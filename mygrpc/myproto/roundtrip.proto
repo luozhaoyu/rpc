@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+option java_package = "io.grpc.examples";
+
+package myproto;
+
+// The greeter service definition.
+service Echoer {
+  // Sends a greeting
+  rpc Echo (RequestMessage) returns (ResponseMessage) {}
+  rpc SendClientStream (stream RequestMessage) returns (ResponseMessage) {}
+  rpc SendServerStream (stream RequestMessage) returns (stream ResponseMessage) {}
+}
+
+// The request message containing the user's name.
+message RequestMessage {
+  string message = 1;
+}
+
+// The response message containing the greetings
+message ResponseMessage {
+  string message = 1;
+}
