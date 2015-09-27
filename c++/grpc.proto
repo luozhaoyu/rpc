@@ -1,32 +1,23 @@
 syntax = "proto3";
 
-service useless_service {
-  rpc mul_int_2 (int_msg) returns (int_msg) { }
-  rpc mul_dbl_4 (dbl_msg) returns (dbl_msg) { }
-  rpc cat_str (str_msg) returns (str_msg) { }
+message big_message {
+    int32 idata = 1;
+    float fdata = 2;
+    double ddata = 3;
+    string sdata = 4;
+    little ldata = 5;
+    
+    message little {
+        int32 first = 1;
+        int32 second = 2;
+        string third = 3;
+    }
 }
 
-message int_msg {
+message tiny_message {
     int32 data = 1;
 }
-message dbl_msg {
-    double data = 1;
-}
-message str_msg {
-    string data = 1;
-}
 
-message Outer {                  // Level 0
-  message MiddleAA {  // Level 1
-    message Inner {   // Level 2
-      int64 ival = 1;
-      bool  booly = 2;
-    }
-  }
-  message MiddleBB {  // Level 1
-    message Inner {   // Level 2
-      int32 ival = 1;
-      bool  booly = 2;
-    }
-  } 
+service basic_service {
+    rpc int_echo (tiny_message) returns (tiny_message) { }
 }

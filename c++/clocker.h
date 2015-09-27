@@ -1,8 +1,8 @@
-// clock.h : clock class for encapsulating timing measurements.
+// clocker.h : clock class for encapsulating timing measurements.
 // by: allison morris
 
-#ifndef CLOCK_H
-#define CLOCK_H
+#ifndef CLOCKER_H
+#define CLOCKER_H
 
 #include <time.h>
 #include <sys/time.h>
