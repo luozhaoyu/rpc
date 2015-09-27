@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+service useless_service {
+  rpc mul_int_2 (int_msg) returns (int_msg) { }
+  rpc mul_dbl_4 (dbl_msg) returns (dbl_msg) { }
+  rpc cat_str (str_msg) returns (str_msg) { }
+}
+
+message int_msg {
+    int32 data = 1;
+}
+message dbl_msg {
+    double data = 1;
+}
+message str_msg {
+    string data = 1;
+}
+
+message Outer {                  // Level 0
+  message MiddleAA {  // Level 1
+    message Inner {   // Level 2
+      int64 ival = 1;
+      bool  booly = 2;
+    }
+  }
+  message MiddleBB {  // Level 1
+    message Inner {   // Level 2
+      int32 ival = 1;
+      bool  booly = 2;
+    }
+  } 
+}
