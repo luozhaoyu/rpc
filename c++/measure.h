@@ -1,6 +1,9 @@
 // measure.h : includes measurement templates.
 // by: allison morris
 
+#ifndef MEASURE_H
+#define MEASURE_H
+
 #include <iostream>
 #include <iomanip>
 #include "clocker.h"
@@ -42,3 +45,4 @@ template <class Predicate, class Data> void measure(std::string txt, Predicate p
     std::cout << time << std::endl;
 }
 
+#endif

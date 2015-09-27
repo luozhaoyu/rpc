@@ -1,7 +1,7 @@
 // roundtrip.cc : tests roundtrip rpc.
 // by: allison morris
 
-#include "grpc.pb.h"
+#include "basic_service.h"
 #include "measure.h"
 
 int run_client(std::string);
@@ -25,9 +25,9 @@ int main(int argc, char** argv) {
 }
 
 // runs the client side of the test.
-int run_client(std::String address) {
-    grpc::Channel* channel = grpc::CreateChannel(address, grpc::InsecureCredentials());
-    basic_service::Stub* stub = basic_service::NewStub(channel);
+int run_client(std::string address) {
+    std::shared_ptr<grpc::Channel> channel = grpc::CreateChannel(address, grpc::InsecureCredentials());
+    std::shared_ptr<basic_service::Stub> stub = basic_service::NewStub(channel);
     
     tiny_message request;
     tiny_message response;

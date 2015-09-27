@@ -1,5 +1,9 @@
 syntax = "proto3";
 
+service basic_service {
+    rpc int_echo (tiny_message) returns (tiny_message) { }
+}
+
 message big_message {
     int32 idata = 1;
     float fdata = 2;
@@ -18,6 +22,6 @@ message tiny_message {
     int32 data = 1;
 }
 
-service basic_service {
+/*service basic_service {
     rpc int_echo (tiny_message) returns (tiny_message) { }
-}
+}*/
