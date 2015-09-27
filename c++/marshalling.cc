@@ -1,6 +1,7 @@
 // marshalling.cc : tests packing and unpacking various data types.
 // by: allison morris
 
+#include "grpc.pb.h"
 #include "clocker.h"
 #include "measure.h"
 
@@ -46,8 +47,8 @@ struct pack_string {
 
 struct pack_little {
     void run(message_data& data) {
-        data.msg.clear_ldata();
-        data.msg.set_ldata(data.ldata);
+//        data.msg.clear_ldata();
+//        data.msg.set_ldata(data.ldata);
     }
 };
 
@@ -57,13 +58,13 @@ struct pack_little_full {
         data.msg.mutable_ldata()->set_first(data.idata);
         data.msg.mutable_ldata()->set_second(data.idata);
         data.msg.mutable_ldata()->set_third(data.sdata);
-        data.msg.set_ldata(data.ldata);
+//        data.msg.set_ldata(data.ldata);
     }
 };
 
 int main(int argc, char** argv) {
     message_data data;
-    clocker::mode mode = clocker::beta_clock;
+    clocker::mode mode = clocker::clock_gettime;
     int count = 100;
     
     // basic measurements.
@@ -95,11 +96,11 @@ int main(int argc, char** argv) {
     measure("packing inner with 256 char string from raw", pack_little_full(), data, mode, count);
     
     // simple inner measurements.
-    data.msg.mutable_ldata->set_third("K");
+    data.msg.mutable_ldata()->set_third("K");
     measure("packing inner with 1 char string from packed", pack_little(), data, mode, count);
-    data.msg.mutable_ldata->set_third("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    data.msg.mutable_ldata()->set_third("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
     measure("packing inner with 64 char string from packed", pack_little(), data, mode, count);
-    data.msg.mutable_ldata->set_third(data.sdata);
+    data.msg.mutable_ldata()->set_third(data.sdata);
     measure("packing inner with 256 char string from packed", pack_little(), data, mode, count);
     
     return 0;
