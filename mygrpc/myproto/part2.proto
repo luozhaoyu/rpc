@@ -9,7 +9,6 @@ service Echoer {
   // Sends a greeting
   rpc Echo (RequestMessage) returns (ResponseMessage) {}
   rpc SendClientStream (stream RequestMessage) returns (ResponseMessage) {}
-  rpc SendServerStream (stream RequestMessage) returns (stream ResponseMessage) {}
 }
 
 // The request message containing the user's name.
