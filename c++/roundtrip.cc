@@ -11,16 +11,15 @@ int run_server(std::string);
 struct message_data {
     tiny_message request;
     tiny_message response;
-    grpc::ClientContext* context;
     basic_service::Stub* stub;
 };
 
 // predicate function executed on each iteration of the tester.
 struct roundtrip {
     void run(message_data& data) {
-        data.stub->int_echo(data.context, data.request, &data.response);
+        grpc::ClientContext ctx;
+        data.stub->int_echo(&ctx, data.request, &data.response);
         data.request.set_data(data.response.data());
-        std::cout << "sent" << std::endl;
     }
 };
 
@@ -41,6 +40,8 @@ int main(int argc, char** argv) {
     }
 }
 
+
+
 // runs the client side of the test.
 int run_client(std::string address) {
     std::shared_ptr<grpc::Channel> channel = grpc::CreateChannel(address, grpc::InsecureCredentials());
@@ -49,19 +50,11 @@ int run_client(std::string address) {
     int count = 15;    
 
     message_data data;
-    grpc::ClientContext context;
     data.request.set_data(13);
-    data.context = &context;
     data.stub = stub.get();
     measure("Average echo time", roundtrip(), data, mode, count);
-   
-    grpc::Status status = stub->int_echo(data.context, data.request, &data.response);
     
-    if (status.ok()) {
-        std::cout << "Sent " << data.request.data() << " and received " << data.response.data() << std::endl;
-    } else {
-        std::cout << "Failed to send. " << std::endl;
-    }
+    return 0;
 }
 
 // runs the server side of the test.
