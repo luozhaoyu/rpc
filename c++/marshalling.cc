@@ -47,8 +47,8 @@ struct pack_string {
 
 struct pack_little {
     void run(message_data& data) {
-//        data.msg.clear_ldata();
-//        data.msg.set_ldata(data.ldata);
+        data.msg.clear_ldata();
+        *data.msg.mutable_ldata() = (data.ldata);
     }
 };
 
@@ -58,7 +58,7 @@ struct pack_little_full {
         data.msg.mutable_ldata()->set_first(data.idata);
         data.msg.mutable_ldata()->set_second(data.idata);
         data.msg.mutable_ldata()->set_third(data.sdata);
-//        data.msg.set_ldata(data.ldata);
+        *data.msg.mutable_ldata() = (data.ldata);
     }
 };
 
