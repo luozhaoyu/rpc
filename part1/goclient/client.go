@@ -25,7 +25,7 @@ func ReliableBlockingCall(conn *net.UDPConn, request *part1.MyRPC) (*part1.MyRPC
 		part1.CheckError(err)
 		written, err = conn.Write(data)
 		//log.Println(request)
-		log.Println("written", written, len(request.Data))
+		//log.Println("written", written, len(request.Data))
 		part1.CheckError(err)
 
 		err = conn.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
@@ -36,7 +36,6 @@ func ReliableBlockingCall(conn *net.UDPConn, request *part1.MyRPC) (*part1.MyRPC
 			switch err := err.(type) {
 			case net.Error:
 				if err.Timeout() {
-					log.Println(err, "Retry...")
 					continue
 				} else {
 					log.Fatal(err)
@@ -55,16 +54,20 @@ func ReliableBlockingCall(conn *net.UDPConn, request *part1.MyRPC) (*part1.MyRPC
 
 func RoundTripCall(conn *net.UDPConn) error {
 	totalTimes := 1000
-	var sumTime float64
+	var sumTime, sumRPCTime float64
 	request := part1.MyRPC{FunctionId: 1, Flag: 0, Data: []byte{}}
 	for i := 0; i < totalTimes; i++ {
+		startTime := time.Now()
 		response, seconds, _, err := ReliableBlockingCall(conn, &request)
+		endTime := time.Now()
+		sumRPCTime += endTime.Sub(startTime).Seconds()
 		if err != nil || response.Flag == 0 {
 			log.Fatal(response, err)
 		}
 		sumTime += seconds
 	}
 	log.Printf("Tried %v times: %v ms in average\n", totalTimes, sumTime/float64(totalTimes)/1000)
+	log.Printf("Used time %v\tRPC time %v\n", sumTime, sumRPCTime)
 	return nil
 }
 
@@ -105,23 +108,23 @@ func AllBandwidth(conn *net.UDPConn) error {
 }
 
 func main() {
-	serverAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:50051")
-	if err != nil {
-		log.Fatal(err)
-	}
-	localAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	conn, err := net.DialUDP("udp", localAddr, serverAddr)
-	defer conn.Close()
-
 	var action string
 	var dataSize int
+	var ip string
 	flag.StringVar(&action, "a", "roundtrip", "roundtrip|bandwidth|all")
+	flag.StringVar(&ip, "ip", "localhost:31349", "server ip and port")
 	flag.IntVar(&dataSize, "size", 128, "data size")
 	flag.Parse()
+	log.Println(ip)
+
+	serverAddr, err := net.ResolveUDPAddr("udp", ip)
+	part1.CheckError(err)
+	//localAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")
+	part1.CheckError(err)
+
+	conn, err := net.DialUDP("udp", nil, serverAddr)
+	part1.CheckError(err)
+	defer conn.Close()
 
 	if action == "roundtrip" {
 		if err := RoundTripCall(conn); err != nil {
@@ -135,5 +138,7 @@ func main() {
 		log.Printf("%v\t%v", dataSize, speed)
 	} else if action == "all" {
 		AllBandwidth(conn)
+	} else {
+		log.Println("Wrong Input")
 	}
 }

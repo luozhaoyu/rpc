@@ -34,7 +34,7 @@ func main() {
 	flag.IntVar(&dropRate, "P", 0, "probability to drop packet")
 	flag.Parse()
 
-	serverAddr, err := net.ResolveUDPAddr("udp", ":50051")
+	serverAddr, err := net.ResolveUDPAddr("udp", ":31349")
 	if err != nil {
 		log.Fatal(err)
 	}
