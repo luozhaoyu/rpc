@@ -26,6 +26,7 @@ func Roundtrip(c myproto.EchoerClient, message string) error {
 	var total, i int64
 	var max int64 = 10000
 
+	fmt.Println("i%\tAVG ns\tsize")
 	for i = 0; i < max; i++ {
 		startTime = time.Now()
 		r, err := c.Echo(context.Background(), &myproto.RequestMessage{Message: message})
@@ -34,7 +35,7 @@ func Roundtrip(c myproto.EchoerClient, message string) error {
 		du = endTime.Sub(startTime)
 		total += du.Nanoseconds()
 		if i*100%max == 0 {
-			log.Printf("%v%% Echo: %v %v", i*100/max, r.Message, total/(i+1))
+			fmt.Printf("%v\t%v\t%v\n", i*100/max, total/(i+1), len(r.Message))
 		}
 		if err != nil {
 			log.Fatalf("could not echo: %v", err)
@@ -90,16 +91,16 @@ func AllBandwidth(c myproto.EchoerClient) error {
 }
 
 func main() {
-	var message, address, rpc string
+	var message, ip, rpc string
 	var size int
 
-	flag.StringVar(&address, "address", "localhost:50051", "Server IP address")
+	flag.StringVar(&ip, "ip", "localhost:31350", "Server IP port")
 	flag.IntVar(&size, "size", 8, "random message size")
-	flag.StringVar(&rpc, "rpc", "roundtrip|bandwidth|allbandwidth", "bandwidth: client stream")
+	flag.StringVar(&rpc, "rpc", "roundtrip|bandwidth|all", "bandwidth: client stream")
 	flag.Parse()
 	message = GetRandomString(size)
 
-	conn, err := grpc.Dial(address, grpc.WithInsecure())
+	conn, err := grpc.Dial(ip, grpc.WithInsecure())
 	if err != nil {
 		log.Fatalf("did not connect: %v", err)
 	}
@@ -111,7 +112,7 @@ func main() {
 	} else if rpc == "bandwidth" {
 		speed, response, err := Bandwidth(c, message)
 		log.Println(speed, response, err)
-	} else if rpc == "allbandwidth" {
+	} else if rpc == "all" {
 		AllBandwidth(c)
 	} else {
 		log.Println("Wrong rpc input:", rpc)

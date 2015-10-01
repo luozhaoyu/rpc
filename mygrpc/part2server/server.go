@@ -30,11 +30,11 @@ func (s *server) SendClientStream(stream myproto.Echoer_SendClientStreamServer) 
 }
 
 func main() {
-	l, err := net.Listen("tcp", ":50051")
+	l, err := net.Listen("tcp", ":31350")
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	} else {
-		log.Printf("I am listening at: 50051")
+		log.Printf("I am listening at: 31350")
 	}
 	s := grpc.NewServer()
 	myproto.RegisterEchoerServer(s, &server{})
