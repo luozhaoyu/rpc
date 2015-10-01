@@ -2,6 +2,7 @@ syntax = "proto3";
 
 service basic_service {
     rpc int_echo (tiny_message) returns (tiny_message) { }
+    rpc pull_list (tiny_message) returns (stream bulk_message) { }
 }
 
 message big_message {
@@ -18,10 +19,34 @@ message big_message {
     }
 }
 
+message bulk_message {
+    string data = 1;
+}
+
 message tiny_message {
     int32 data = 1;
 }
 
-/*service basic_service {
-    rpc int_echo (tiny_message) returns (tiny_message) { }
-}*/
+message str_msg {
+    string sdata = 1;
+}
+
+message complex_message {
+  top_half top = 1;
+  bottom_half bot = 2;
+  message top_half {
+    shell wrap = 1;
+    message shell {
+      int64 ldata = 1;
+      bool  bdata = 2;
+    }
+  }
+  message bottom_half {
+    shell wrap = 1;
+    message shell {
+      int32 idata = 1;
+      bool  bdata = 2;
+    }
+  }
+}
+

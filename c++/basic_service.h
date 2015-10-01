@@ -10,7 +10,12 @@
 
 class basic_service_impl : public basic_service::Service {
 public:
+    static const int count = 100000;
+
     grpc::Status int_echo(grpc::ServerContext* context, const tiny_message* request, tiny_message* reply);
+
+    grpc::Status pull_list(grpc::ServerContext* context, const tiny_message*
+      request, grpc::ServerWriter<bulk_message>* writer);
 
 };
 
