@@ -1,0 +1,56 @@
+// file.proto : outlines the rpc mechanism.
+
+syntax = "proto3";
+
+package File;
+
+// all remote routines are in this service.
+service BasicFileService {
+  rpc CreateDirectory (Path) returns (Result) { }
+  rpc CreateFile (Path) returns (Result) { }
+  rpc DownloadFile (Path) returns (File) { }
+  rpc GetDirectoryContents (Path) returns (DirInfo) { }
+  rpc GetFileInfo (Path) returns (FileInfo) { }
+  rpc RemoveDirectory (Path) returns (Result) { }
+  rpc RemoveFile (Path) returns (Result) { }
+  rpc UploadFile (FileData) returns (FileInfo) { }
+}
+
+// stores the contents of a directory if valid.
+message DirInfo {
+  bool valid = 1;
+  repeated FileInfo contents = 2;
+}
+
+// stores a path of a file. element 2 is used to signal creation on open.
+message Path {
+  string data = 1;
+  bool create_on_open = 2;
+}
+
+// stores a path and data to be uploaded.
+message FileData {
+  Path path = 1;
+  repeated string contents = 2;
+}
+
+// stores all information that needs to be fetched by our server. we
+// don't care about user and group ids or file permissions.
+message FileInfo {
+  bool valid = 1;
+  string name = 2;
+  int64 access_time = 3;
+  int64 modification_time = 4;
+  int64 creation_time = 5;
+}
+
+// a whole file with info. no file is transmitted if info.valid() is false.
+message File {
+  FileInfo info = 1;
+  repeated string contents = 2;
+}
+
+// stores a status: true for success.
+message Result {
+  bool valid = 1;
+}
