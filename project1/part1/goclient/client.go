@@ -19,7 +19,7 @@ func ReliableBlockingCall(conn *net.UDPConn, request *part1.MyRPC) (*part1.MyRPC
 
 	startTime = time.Now()
 	for {
-		err = conn.SetWriteDeadline(time.Now().Add(10 * time.Millisecond))
+		err = conn.SetWriteDeadline(time.Now().Add(200 * time.Millisecond))
 		part1.CheckError(err)
 		data, err := request.MarshalBinary()
 		part1.CheckError(err)
@@ -28,7 +28,7 @@ func ReliableBlockingCall(conn *net.UDPConn, request *part1.MyRPC) (*part1.MyRPC
 		//log.Println("written", written, len(request.Data))
 		part1.CheckError(err)
 
-		err = conn.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
+		err = conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
 		part1.CheckError(err)
 		n, _, err = conn.ReadFromUDP(buf)
 		//log.Println("readn", n, conn.RemoteAddr())
@@ -66,7 +66,7 @@ func RoundTripCall(conn *net.UDPConn) error {
 		}
 		sumTime += seconds
 	}
-	log.Printf("Tried %v times: %v ms in average\n", totalTimes, sumTime/float64(totalTimes)/1000)
+	log.Printf("Tried %v times: %v ms in average\n", totalTimes, 1000*sumTime/float64(totalTimes))
 	log.Printf("Used time %v\tRPC time %v\n", sumTime, sumRPCTime)
 	return nil
 }
