@@ -18,8 +18,8 @@ service BasicFileService {
 
 // stores the contents of a directory if valid.
 message DirInfo {
-  bool valid = 1;
-  repeated FileInfo contents = 2;
+  int32 error_code = 1;
+  repeated string contents = 2;
 }
 
 // stores a path of a file. element 2 is used to signal creation on open.
@@ -37,7 +37,7 @@ message FileData {
 // stores all information that needs to be fetched by our server. we
 // don't care about user and group ids or file permissions.
 message FileInfo {
-  bool valid = 1;
+  int32 error_code = 1;
   string name = 2;
   int64 access_time = 3;
   int64 modification_time = 4;
@@ -52,5 +52,5 @@ message File {
 
 // stores a status: true for success.
 message Result {
-  bool valid = 1;
+  int32 error_code = 1;
 }
