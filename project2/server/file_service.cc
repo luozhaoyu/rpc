@@ -151,6 +151,7 @@ bool FileService::GetFileInfo(const std::string& full_path, FileInfo* info) cons
   info->set_access_time(stat_buffer.st_atime);
   info->set_creation_time(stat_buffer.st_ctime);
   info->set_modification_time(stat_buffer.st_mtime);
+  info->set_size(stat_buffer.st_size);
   return true;
 }
 
