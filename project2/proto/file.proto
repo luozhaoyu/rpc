@@ -39,9 +39,10 @@ message FileData {
 message FileInfo {
   bool valid = 1;
   string name = 2;
-  int64 access_time = 3;
-  int64 modification_time = 4;
-  int64 creation_time = 5;
+  uint64 access_time = 3;
+  uint64 modification_time = 4;
+  uint64 creation_time = 5;
+  uint64 size = 6;
 }
 
 // a whole file with info. no file is transmitted if info.valid() is false.
@@ -52,5 +53,5 @@ message File {
 
 // stores a status: true for success.
 message Result {
-  bool valid = 1;
+  int32 error_code = 1;
 }
