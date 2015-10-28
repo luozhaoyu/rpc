@@ -1,7 +1,8 @@
 # Makefile
 # # by: allison morris
 
-GRPC=../../../grpc
+#GRPC=../../../grpc
+GRPC=$(HOME)/install/grpc
 FLAGS=-g --std=c++11
 INCLUDE=-I$(GRPC)/third_party/protobuf/src -I$(GRPC)/include \
  -L$(GRPC)/libs/opt/protobuf -L$(GRPC)/libs/opt
