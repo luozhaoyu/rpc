@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"log"
 	"os"
@@ -24,6 +25,11 @@ type HelloFs struct {
 }
 
 func (me *HelloFs) GetAttr(name string, context *fuse.Context) (*fuse.Attr, fuse.Status) {
+	if name == "" {
+		log.Println("Warning: name is empty GetAttr:", name)
+		return nil, fuse.ENOENT
+	}
+	log.Println("GetAttr:", name)
 	path := File.Path{Data: name}
 	fileInfo, err := me.Client.GetFileInfo(ctx.Background(), &path)
 	if err != nil {
@@ -40,26 +46,35 @@ func (me *HelloFs) GetAttr(name string, context *fuse.Context) (*fuse.Attr, fuse
 }
 
 func (me *HelloFs) OpenDir(name string, context *fuse.Context) (c []fuse.DirEntry, code fuse.Status) {
+	log.Println("OpenDir:", name)
 	path := File.Path{Data: name}
 	dirInfo, err := me.Client.GetDirectoryContents(ctx.Background(), &path)
 	if err != nil {
 		log.Fatal(err)
 	}
 	for _, fileInfo := range dirInfo.Contents {
-		log.Println(name, fileInfo.Name)
-		c = append(c, fuse.DirEntry{Name: fileInfo.Name})
+		//log.Println(name, fileInfo)
+		c = append(c, fuse.DirEntry{Name: fileInfo})
 	}
 	return c, fuse.OK
 }
 
 func (me *HelloFs) Open(name string, flags uint32, context *fuse.Context) (file nodefs.File, code fuse.Status) {
-	if name != "file.txt" {
+	log.Println("Open:", name)
+	path := File.Path{Data: name}
+	f, err := me.Client.DownloadFile(ctx.Background(), &path)
+	if err != nil {
+		log.Println(err)
 		return nil, fuse.ENOENT
 	}
 	if flags&fuse.O_ANYWRITE != 0 {
 		return nil, fuse.EPERM
 	}
-	return nodefs.NewDataFile([]byte(name)), fuse.OK
+	var buf bytes.Buffer
+	for _, d := range f.Contents {
+		buf.WriteString(d)
+	}
+	return nodefs.NewDataFile(buf.Bytes()), fuse.OK
 }
 
 // NewGrpcClient ...
@@ -79,7 +94,7 @@ func recover(path string, info os.FileInfo, err error) error {
 }
 
 func diagnose(cachePath string) error {
-	log.Println("Checking if there was crash before...")
+	log.Printf("Checking cache folder: %v...", cachePath)
 	err := filepath.Walk(cachePath, recover)
 	log.Println("Recovery check finished")
 	return err
@@ -87,9 +102,9 @@ func diagnose(cachePath string) error {
 
 func main() {
 	var mountPath, cachePath, ip string
-	flag.StringVar(&mountPath, "-t", "tmp", "path you want to mount AFS")
-	flag.StringVar(&cachePath, "-c", "cache", "cache files for write operations")
-	flag.StringVar(&ip, "-i", "localhost:31349", "server address")
+	flag.StringVar(&mountPath, "m", "root", "path you want to mount AFS")
+	flag.StringVar(&cachePath, "c", "cache", "cache files for write operations")
+	flag.StringVar(&ip, "server", "localhost:61512", "server address")
 	flag.Parse()
 
 	nfs := pathfs.NewPathNodeFs(&HelloFs{

@@ -17,8 +17,10 @@ cs 739 intro to communication
     - `make install prefix=$HOME/local`
 - ensure `protoc-gen-go` and `grpc_cpp_plugin` are present
 
-### gRPC Support
-`protoc --go_out=plugins=grpc:. *.proto`
+### Build
+* client
+    1. gRPC Support `cd ~/project2/proto; protoc --go_out=plugins=grpc:. *.proto`
+    - `cd ~/project2/client; go build`
 
 ## [Crash-Consistent] (https://www.usenix.org/system/files/conference/osdi14/osdi14-paper-pillai.pdf)
 * break down categories:

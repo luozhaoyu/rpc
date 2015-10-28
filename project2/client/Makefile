@@ -2,5 +2,5 @@ build:
 	go build
 	./client -h
 clean:
-	-fusermount -u tmp
+	-sudo fusermount -u root
 	-go clean
