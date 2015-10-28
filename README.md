@@ -2,6 +2,13 @@
 cs 739 intro to communication
 
 ## Install
+1. `go get google.golang.org/grpc`
+- `git clone https://github.com/grpc/grpc.git`
+    * `git submodule update --init`
+    * `make`
+    * `make install prefix=$HOME/local`
+- ensure `protoc-gen-go` and `grpc_cpp_plugin` are present
+
 ### gRPC Support
 `protoc --go_out=plugins=grpc:. *.proto`
 
