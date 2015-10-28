@@ -2,11 +2,19 @@
 cs 739 intro to communication
 
 ## Install
-1. `go get google.golang.org/grpc`
+1. Protobuf
+    1. `git clone https://github.com/google/protobuf.git`
+    - `configure --prefix=$HOME/local`
+    - `make`
+    - `make check`
+    - `make install`
+- Go Configuration
+    * `go get -a github.com/golang/protobuf/protoc-gen-go`
+    * `go get google.golang.org/grpc`
 - `git clone https://github.com/grpc/grpc.git`
-    * `git submodule update --init`
-    * `make`
-    * `make install prefix=$HOME/local`
+    1. `git submodule update --init`
+    - `make`
+    - `make install prefix=$HOME/local`
 - ensure `protoc-gen-go` and `grpc_cpp_plugin` are present
 
 ### gRPC Support
