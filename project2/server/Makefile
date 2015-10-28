@@ -5,7 +5,7 @@
 GRPC=$(HOME)/install/grpc
 FLAGS=-g --std=c++11
 INCLUDE=-I$(GRPC)/third_party/protobuf/src -I$(GRPC)/include \
- -L$(GRPC)/libs/opt/protobuf -L$(GRPC)/libs/opt
+ -L$(GRPC)/libs/opt/protobuf -L$(GRPC)/libs/opt -Wl,-rpath $(GRPC)/libs/opt
 LIBS=-lgrpc++_unsecure -lgrpc -lgpr -lprotobuf
 GRPC_PLUGIN=$(GRPC)/bins/opt/grpc_cpp_plugin
 PB=file.pb.o file.grpc.pb.o
