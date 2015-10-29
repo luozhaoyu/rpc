@@ -64,8 +64,8 @@ func main() {
 	log.Printf("MountPath: %s, CachePath: %s\n", mountPoint, cachePath)
 
 	err = fs.Serve(c, &MyFS{
-		Client: NewGrpcClient(ip),
-		Files:  make(map[string]proto.File)})
+		Client:     NewGrpcClient(ip),
+		FileCaches: make(map[string]*MyFile)})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -79,18 +79,18 @@ func main() {
 
 // FS implements the hello world file system.
 type MyFS struct {
-	Client proto.BasicFileServiceClient
-	Files  map[string]proto.File
+	Client     proto.BasicFileServiceClient
+	FileCaches map[string]*MyFile
 }
 
 func (f *MyFS) Root() (fs.Node, error) {
-	return &Dir{Name: "", Client: f.Client}, nil
+	return &Dir{Name: "", fs: f}, nil
 }
 
 // Dir implements both Node and Handle for the root directory.
 type Dir struct {
-	Name   string
-	Client proto.BasicFileServiceClient
+	Name string
+	fs   *MyFS
 }
 
 func MyGetAttr(Client proto.BasicFileServiceClient, name string, a *fuse.Attr) error {
@@ -118,12 +118,12 @@ func MyGetAttr(Client proto.BasicFileServiceClient, name string, a *fuse.Attr) e
 
 func (d *Dir) Attr(ctx context.Context, a *fuse.Attr) error {
 	log.Println("DirAttr:", d.Name)
-	return MyGetAttr(d.Client, d.Name, a)
+	return MyGetAttr(d.fs.Client, d.Name, a)
 }
 
 func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 	log.Println("Lookup:", name)
-	return &File{Name: name, Client: d.Client}, nil
+	return &MyFile{Name: name, fs: d.fs}, nil
 }
 
 var dirDirs = []fuse.Dirent{
@@ -133,7 +133,7 @@ var dirDirs = []fuse.Dirent{
 func (d *Dir) ReadDirAll(ctx context.Context) (c []fuse.Dirent, err error) {
 	log.Println("ReadDirAll:", d.Name)
 	path := proto.Path{Data: d.Name}
-	dirInfo, err := d.Client.GetDirectoryContents(context.Background(), &path)
+	dirInfo, err := d.fs.Client.GetDirectoryContents(context.Background(), &path)
 
 	if err != nil {
 		log.Fatal(err)
@@ -151,55 +151,70 @@ func (d *Dir) ReadDirAll(ctx context.Context) (c []fuse.Dirent, err error) {
 //}
 
 // File implements both Node and Handle for the hello file.
-type File struct {
-	Name   string
-	Client proto.BasicFileServiceClient
+type MyFile struct {
+	*proto.File
+	Name string
+	fs   *MyFS
+	buf  bytes.Buffer
 }
 
 const greeting = "hello, world\n"
 
-func (f *File) Attr(ctx context.Context, a *fuse.Attr) error {
+func (f *MyFile) Attr(ctx context.Context, a *fuse.Attr) error {
 	log.Println("FileAttr:", f.Name)
-	return MyGetAttr(f.Client, f.Name, a)
+	return MyGetAttr(f.fs.Client, f.Name, a)
 }
 
-func (f *File) ReadAll(ctx context.Context) ([]byte, error) {
-	log.Println("FileReadAll:", f.Name)
+// only for opened file or directory
+func (f *MyFile) ReadAll(ctx context.Context) ([]byte, error) {
+	log.Println("FileReadAll:", f.Name, f.buf.Len())
+	return f.buf.Bytes(), nil
+}
+
+func (f *MyFile) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
+	log.Println("FileRead:", f.Name)
+	return nil
+}
+
+// only for opened file or directory
+func (f *MyFile) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.WriteResponse) error {
+	log.Println("FileWrite", f.Name, len(req.Data))
+	b := f.buf.Bytes()
+	tmp := append(b[:req.Offset], req.Data...)
+	if int(req.Offset)+len(req.Data) < len(b) {
+		tmp = append(tmp, b[int(req.Offset)+len(req.Data)+1:]...)
+	}
+	b = tmp
+	resp.Size = len(b)
+	return nil
+}
+
+func (f *MyFile) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
+	log.Println("FileOpen", f.Name)
 	path := proto.Path{Data: f.Name}
-	myfile, err := f.Client.DownloadFile(context.Background(), &path)
+	myfile, err := f.fs.Client.DownloadFile(context.Background(), &path)
 	if err != nil {
 		log.Println(err)
 		return nil, fuse.ENOENT
 	}
 
-	var buf bytes.Buffer
+	fileCache := &MyFile{File: myfile, Name: f.Name, fs: f.fs}
 	for _, d := range myfile.Contents {
-		buf.WriteString(d)
+		fileCache.buf.WriteString(d)
 	}
-	return buf.Bytes(), nil
+	f.fs.FileCaches[f.Name] = fileCache
+	return fileCache, nil
 }
 
-func (f *File) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.WriteResponse) error {
-	log.Println("FileWrite", f.Name)
+func (f *MyFile) Flush(ctx context.Context, req *fuse.FlushRequest) error {
+	log.Println("FileFlush", f.Name, f.buf.Len())
 	var in proto.FileData
 	in.Path = &proto.Path{Data: f.Name}
-	content := string(req.Data)
-	in.Contents = append(in.Contents, content)
-	fileInfo, err := f.Client.UploadFile(context.Background(), &in)
+	in.Contents = append(in.Contents, f.buf.String())
+	_, err := f.fs.Client.UploadFile(context.Background(), &in)
 	if err != nil {
 		log.Println(err)
 		return err
 	}
-	resp.Size = int(fileInfo.Size)
-	return nil
-}
-
-//func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
-//	log.Println("FileOpen", f.Name)
-//	return nil, nil
-//}
-
-func (f *File) Flush(ctx context.Context, req *fuse.FlushRequest) error {
-	log.Println("FileFlush", f.Name)
 	return nil
 }
