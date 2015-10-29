@@ -60,10 +60,7 @@ public:
 
     if (reply.info().error_code() != 0) { return false; }
 
-    for (int i = 0; i < reply.contents_size(); ++i) {
-      const std::string& chunk = reply.contents(i);
-      dest->write(chunk.c_str(), chunk.length());
-    }
+    dest->write(reply.contents().c_str(), reply.contents().size());
     return true;
   }
 
@@ -152,8 +149,7 @@ public:
       int read_size = src.gcount();
 
       if (read_size > 0) {
-        std::string* chunk = request.add_contents();
-	chunk->assign(buffer, read_size);
+	request.mutable_contents()->append(buffer, read_size);
       } else {
         stop = true;
       }

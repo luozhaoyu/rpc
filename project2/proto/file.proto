@@ -31,24 +31,26 @@ message Path {
 // stores a path and data to be uploaded.
 message FileData {
   Path path = 1;
-  repeated string contents = 2;
+  bytes contents = 2;
 }
 
 // stores all information that needs to be fetched by our server. we
 // don't care about user and group ids or file permissions.
 message FileInfo {
   int32 error_code = 1;
-  string name = 2;
-  uint64 access_time = 3;
-  uint64 modification_time = 4;
-  uint64 creation_time = 5;
-  uint64 size = 6;
+  int32 mode = 2; 
+  string name = 3;
+  uint64 access_time = 4;
+  uint64 modification_time = 5;
+  uint64 creation_time = 6;
+  uint64 size = 7;
+  uint64 inode = 8;
 }
 
 // a whole file with info. no file is transmitted if info.valid() is false.
 message File {
   FileInfo info = 1;
-  repeated string contents = 2;
+  bytes contents = 2;
 }
 
 // stores a status: true for success.

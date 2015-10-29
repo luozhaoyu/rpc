@@ -71,7 +71,7 @@ Status FileService::DownloadFile(ServerContext* ctx, const Path* path,
     return Status::OK;
   }
 
-  // send file in chunks of up to 1024 bytes.
+  // read file in chunks of up to 1024 bytes.
   static const int kMaxSize = 1024;
   bool stop = false;
   do {
@@ -79,8 +79,7 @@ Status FileService::DownloadFile(ServerContext* ctx, const Path* path,
     stream.read(buffer, kMaxSize);
     int read_size = stream.gcount();
     if (read_size > 0) {
-      std::string* chunk = file->add_contents();
-      chunk->append(buffer, read_size);
+      file->mutable_contents()->append(buffer, read_size);
     } else {
       stop = true;
     }
@@ -148,10 +147,12 @@ bool FileService::GetFileInfo(const std::string& full_path, FileInfo* info) cons
   // otherwise, return the access, mod, and creation times.
   GetLog(kTrace) << "obtained info for file: " << full_path << "\n";
   info->set_error_code(0);
+  info->set_mode(stat_buffer.st_mode);
   info->set_access_time(stat_buffer.st_atime);
   info->set_creation_time(stat_buffer.st_ctime);
   info->set_modification_time(stat_buffer.st_mtime);
   info->set_size(stat_buffer.st_size);
+  info->set_inode(stat_buffer.st_ino);
   return true;
 }
 
@@ -238,11 +239,7 @@ Status FileService::UploadFile(ServerContext* ctx, const FileData* file,
     return Status::OK;
   }
 
-  int num_chunks = file->contents_size();
-  for (int i = 0; i < num_chunks; ++i) {
-    const std::string& chunk = file->contents(i);
-    stream.write(chunk.c_str(), chunk.length());
-  }
+  stream.write(file->contents().c_str(), file->contents().size());
 
   if (stream.bad()) {
     GetLog(kErr) << "error writing file: " << file->path().data() << "\n";
