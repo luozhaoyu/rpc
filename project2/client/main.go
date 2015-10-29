@@ -16,38 +16,43 @@ import (
 	"github.com/hanwen/go-fuse/fuse/nodefs"
 	"github.com/hanwen/go-fuse/fuse/pathfs"
 
-	"rpc/project2/proto"
+	proto "rpc/project2/proto"
 )
 
 type HelloFs struct {
 	pathfs.FileSystem
-	Client File.BasicFileServiceClient
+	Client proto.BasicFileServiceClient
+	Files  map[string]proto.File
 }
 
 func (me *HelloFs) GetAttr(name string, context *fuse.Context) (*fuse.Attr, fuse.Status) {
-	if name == "" {
-		log.Println("Warning: name is empty GetAttr:", name)
-		return nil, fuse.ENOENT
-	}
 	log.Println("GetAttr:", name)
-	path := File.Path{Data: name}
+	path := proto.Path{Data: name}
 	fileInfo, err := me.Client.GetFileInfo(ctx.Background(), &path)
+	log.Println("GetFileInfo:", fileInfo)
 	if err != nil {
 		log.Println(err)
 		return nil, fuse.ENOENT
+	}
+
+	var mode uint32
+	if name == "" { // hack for server did not return mode
+		mode = fuse.S_IFDIR | 0644
+	} else {
+		mode = fuse.S_IFREG | 0644
 	}
 	return &fuse.Attr{
 		Size:  fileInfo.Size,
 		Atime: fileInfo.AccessTime,
 		Mtime: fileInfo.ModificationTime,
 		Ctime: fileInfo.CreationTime,
-		Mode:  fuse.S_IFREG | 0644,
+		Mode:  mode,
 	}, fuse.OK
 }
 
 func (me *HelloFs) OpenDir(name string, context *fuse.Context) (c []fuse.DirEntry, code fuse.Status) {
 	log.Println("OpenDir:", name)
-	path := File.Path{Data: name}
+	path := proto.Path{Data: name}
 	dirInfo, err := me.Client.GetDirectoryContents(ctx.Background(), &path)
 	if err != nil {
 		log.Fatal(err)
@@ -61,7 +66,7 @@ func (me *HelloFs) OpenDir(name string, context *fuse.Context) (c []fuse.DirEntr
 
 func (me *HelloFs) Open(name string, flags uint32, context *fuse.Context) (file nodefs.File, code fuse.Status) {
 	log.Println("Open:", name)
-	path := File.Path{Data: name}
+	path := proto.Path{Data: name}
 	f, err := me.Client.DownloadFile(ctx.Background(), &path)
 	if err != nil {
 		log.Println(err)
@@ -70,6 +75,7 @@ func (me *HelloFs) Open(name string, flags uint32, context *fuse.Context) (file 
 	if flags&fuse.O_ANYWRITE != 0 {
 		return nil, fuse.EPERM
 	}
+
 	var buf bytes.Buffer
 	for _, d := range f.Contents {
 		buf.WriteString(d)
@@ -77,14 +83,18 @@ func (me *HelloFs) Open(name string, flags uint32, context *fuse.Context) (file 
 	return nodefs.NewDataFile(buf.Bytes()), fuse.OK
 }
 
+//func (me *HelloFs) Create(name string, flags uint32, mode uint32, context *fuse.Context) (code fuse.Status) {
+//	return fuse.OK
+//}
+
 // NewGrpcClient ...
-func NewGrpcCliet(ip string) File.BasicFileServiceClient {
+func NewGrpcCliet(ip string) proto.BasicFileServiceClient {
 	conn, err := grpc.Dial(ip, grpc.WithInsecure())
 	if err != nil {
 		log.Fatalf("could not connect to %v: %v", ip, err)
 	}
 	//defer conn.Close()
-	c := File.NewBasicFileServiceClient(conn)
+	c := proto.NewBasicFileServiceClient(conn)
 	return c
 }
 
