@@ -86,7 +86,7 @@ Status FileService::DownloadFile(ServerContext* ctx, const Path* path,
   } while (!stop);
 
   GetLog(kInfo) << "sent file: " << path->data() << "\n";
-  file->mutable_info()->set_error_code(0);
+  GetFileInfo(full_path, file->mutable_info());
   return Status::OK;
 }
 
