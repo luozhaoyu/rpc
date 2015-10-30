@@ -109,6 +109,7 @@ func MyGetAttr(Client proto.BasicFileServiceClient, name string, a *fuse.Attr) e
 	} else {
 		a.Mode = 0644
 	}
+	a.Uid = 20001 // zhaoyu
 	a.Size = fileInfo.Size
 	a.Atime = time.Unix(int64(fileInfo.AccessTime), 0)
 	a.Mtime = time.Unix(int64(fileInfo.ModificationTime), 0)
@@ -130,23 +131,6 @@ func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 		d.fs.FileCaches[name] = &MyFile{needDownload: true, Name: name, fs: d.fs, buf: bytes.NewBuffer([]byte{})}
 	}
 	log.Printf("Lookup\t%v\t%v", name, d.fs.FileCaches[name])
-	return d.fs.FileCaches[name], nil
-
-	fileCache, ok := d.fs.FileCaches[name]
-	if !ok {
-		log.Println("Lookup:\tFetchInfoFromServer", name)
-		path := proto.Path{Data: name}
-		fileInfo, err := d.fs.Client.GetFileInfo(context.Background(), &path)
-		if err != nil {
-			log.Println(err)
-			return nil, fuse.ENOENT
-		}
-		fileCache = &MyFile{needDownload: true, Name: name, fs: d.fs, buf: bytes.NewBuffer([]byte{})}
-		log.Println(fileCache, "is alive")
-		fileCache.File = &proto.File{Info: fileInfo}
-		d.fs.FileCaches[name] = fileCache
-	}
-	log.Println("Lookup:", d.fs.FileCaches[name])
 	return d.fs.FileCaches[name], nil
 }
 
@@ -199,35 +183,48 @@ func (f *MyFile) Attr(ctx context.Context, a *fuse.Attr) error {
 		log.Println("Attr:\tHasCache", f.Name, f.File)
 	}
 	a.Inode = f.File.Info.Inode
-	a.Mode = os.FileMode(uint32(f.File.Info.Mode))
+	a.Mode = os.FileMode(uint32(f.File.Info.Mode) | 0644)
+	a.Uid = 20001 // zhaoyu
 	a.Size = f.File.Info.Size
 	a.Atime = time.Unix(int64(f.File.Info.AccessTime), 0)
 	a.Mtime = time.Unix(int64(f.File.Info.ModificationTime), 0)
 	a.Ctime = time.Unix(int64(f.File.Info.CreationTime), 0)
+	f.File.Info.AccessTime = uint64(time.Now().Unix())
 	return nil
 }
 
 // only for opened file or directory
 func (f *MyFile) ReadAll(ctx context.Context) ([]byte, error) {
 	log.Println("ReadAll:", f.Name, f.buf.Len(), f)
+	f.File.Info.AccessTime = uint64(time.Now().Unix())
 	return f.buf.Bytes(), nil
 }
 
 func (f *MyFile) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
 	log.Println("FileRead:", f.Name)
+	f.File.Info.AccessTime = uint64(time.Now().Unix())
 	return nil
 }
 
 // only for opened file or directory
 func (f *MyFile) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.WriteResponse) error {
-	b := f.buf.Bytes()
-	tmp := append(b[:req.Offset], req.Data...)
-	if int(req.Offset)+len(req.Data) < len(b) {
-		tmp = append(tmp, b[int(req.Offset)+len(req.Data)+1:]...)
+	tmp := f.buf.Bytes()
+	f.buf.Reset()
+	if int(req.FileFlags) == os.O_WRONLY {
+		log.Println(req.FileFlags, req.Flags, "WriteOnly")
+		f.buf.Write(req.Data)
+	} else {
+		log.Println(req.FileFlags, req.Flags, "ReadWrite")
+		f.buf.Write(tmp[:req.Offset])
+		f.buf.Write(req.Data)
+		if int(req.Offset)+len(req.Data) < len(tmp) {
+			f.buf.Write(tmp[int(req.Offset)+len(req.Data)+1:])
+		}
 	}
-	b = tmp
-	resp.Size = len(b)
-	log.Printf("Write\t%v\t%v", f, resp.Size)
+	resp.Size = f.buf.Len()
+	log.Println("Write\t", f.Name, req.Offset, string(req.Data), " -> ", f.buf.String())
+	f.File.Info.Size = uint64(f.buf.Len())
+	f.File.Info.ModificationTime = uint64(time.Now().Unix())
 	return nil
 }
 
@@ -270,6 +267,7 @@ func (f *MyFile) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.Ope
 		f.needDownload = false
 		log.Println("Open\tDownloaded\t", f)
 	}
+	f.File.Info.AccessTime = uint64(time.Now().Unix())
 	resp.Handle = fuse.HandleID(f.File.Info.Inode)
 	return f, nil
 }
@@ -283,7 +281,8 @@ func (f *MyFile) Flush(ctx context.Context, req *fuse.FlushRequest) error {
 		log.Println(err)
 		return err
 	}
-	log.Printf("Flush\t%v\t%v", f, response)
+	log.Println(f.buf.String())
+	log.Printf("Flush\tReq:%v\tFile:%v\tResp:%v", req, f, response)
 	return nil
 }
 
@@ -298,6 +297,7 @@ func (d *Dir) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 	return nil
 }
 
+// this function is not in use
 func (f *MyFile) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 	log.Printf("Remove\t%v", f.Name)
 	path := proto.Path{Data: f.Name}
