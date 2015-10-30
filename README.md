@@ -40,14 +40,14 @@ cs 739 intro to communication
 * WriteAheadLog
 * ext3(data-ordered) need `fsync` to ensure order, prevent FS re-order
 
-    creat(/x/log1);
-    write(/x/log1, "2, 3, checksum, foo"); // checksum is to prevent garbage, which means file size alone increases
-    fsync(/x/log1);
-    fsync(/x); // ensure log file's directory entry might never be created
-    pwrite(/x/f1, 2, "bar");
-    fsync(/x/f1);
-    unlink(/x/log1);
-    fsync(/x); // additional fsync() required for durability in all FS
+        creat(/x/log1);
+        write(/x/log1, "2, 3, checksum, foo"); // checksum is to prevent garbage, which means file size alone increases
+        fsync(/x/log1);
+        fsync(/x); // ensure log file's directory entry might never be created
+        pwrite(/x/f1, 2, "bar");
+        fsync(/x/f1);
+        unlink(/x/log1);
+        fsync(/x); // additional fsync() required for durability in all FS
 
 ### Our approach
 * Ensure crash-consistent inside `write()`

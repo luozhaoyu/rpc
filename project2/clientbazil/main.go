@@ -56,11 +56,14 @@ func main() {
 		fuse.LocalVolume(),
 		fuse.VolumeName("Hello world!"),
 	)
+	defer c.Close()
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer c.Close()
-	diagnose(cachePath)
+	err = diagnose(cachePath)
+	if err != nil {
+		log.Println(err)
+	}
 	log.Printf("MountPath: %s, CachePath: %s\n", mountPoint, cachePath)
 
 	err = fs.Serve(c, &MyFS{
@@ -94,8 +97,6 @@ type Dir struct {
 }
 
 func MyGetAttr(Client proto.BasicFileServiceClient, name string, a *fuse.Attr) error {
-	log.Println("MyGetAttr:", name)
-	//a.Inode = 2
 	path := proto.Path{Data: name}
 	fileInfo, err := Client.GetFileInfo(context.Background(), &path)
 	if err != nil {
@@ -122,8 +123,31 @@ func (d *Dir) Attr(ctx context.Context, a *fuse.Attr) error {
 }
 
 func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
-	log.Println("Lookup:", name)
-	return &MyFile{Name: name, fs: d.fs}, nil
+	//	return &MyFile{Name: name, needDownload: true, buf: bytes.NewBuffer([]byte{}), fs: d.fs}, nil
+	_, ok := d.fs.FileCaches[name]
+	if !ok {
+		log.Println("Lookup\tInitializing\t", name)
+		d.fs.FileCaches[name] = &MyFile{needDownload: true, Name: name, fs: d.fs, buf: bytes.NewBuffer([]byte{})}
+	}
+	log.Printf("Lookup\t%v\t%v", name, d.fs.FileCaches[name])
+	return d.fs.FileCaches[name], nil
+
+	fileCache, ok := d.fs.FileCaches[name]
+	if !ok {
+		log.Println("Lookup:\tFetchInfoFromServer", name)
+		path := proto.Path{Data: name}
+		fileInfo, err := d.fs.Client.GetFileInfo(context.Background(), &path)
+		if err != nil {
+			log.Println(err)
+			return nil, fuse.ENOENT
+		}
+		fileCache = &MyFile{needDownload: true, Name: name, fs: d.fs, buf: bytes.NewBuffer([]byte{})}
+		log.Println(fileCache, "is alive")
+		fileCache.File = &proto.File{Info: fileInfo}
+		d.fs.FileCaches[name] = fileCache
+	}
+	log.Println("Lookup:", d.fs.FileCaches[name])
+	return d.fs.FileCaches[name], nil
 }
 
 var dirDirs = []fuse.Dirent{
@@ -153,21 +177,39 @@ func (d *Dir) ReadDirAll(ctx context.Context) (c []fuse.Dirent, err error) {
 // File implements both Node and Handle for the hello file.
 type MyFile struct {
 	*proto.File
-	Name string
-	fs   *MyFS
-	buf  bytes.Buffer
+	Name         string
+	fs           *MyFS
+	buf          *bytes.Buffer
+	needDownload bool
 }
 
-const greeting = "hello, world\n"
-
 func (f *MyFile) Attr(ctx context.Context, a *fuse.Attr) error {
-	log.Println("FileAttr:", f.Name)
-	return MyGetAttr(f.fs.Client, f.Name, a)
+	_, ok := f.fs.FileCaches[f.Name]
+	if !ok || f.File == nil || f.File.Info == nil {
+		log.Println("Attr:\tNoCache", f.Name)
+		path := proto.Path{Data: f.Name}
+		fileInfo, err := f.fs.Client.GetFileInfo(context.Background(), &path)
+		if err != nil {
+			log.Println(err)
+			return fuse.ENOENT
+		}
+		f.File = &proto.File{Info: fileInfo}
+		f.fs.FileCaches[f.Name] = f
+	} else {
+		log.Println("Attr:\tHasCache", f.Name, f.File)
+	}
+	a.Inode = f.File.Info.Inode
+	a.Mode = os.FileMode(uint32(f.File.Info.Mode))
+	a.Size = f.File.Info.Size
+	a.Atime = time.Unix(int64(f.File.Info.AccessTime), 0)
+	a.Mtime = time.Unix(int64(f.File.Info.ModificationTime), 0)
+	a.Ctime = time.Unix(int64(f.File.Info.CreationTime), 0)
+	return nil
 }
 
 // only for opened file or directory
 func (f *MyFile) ReadAll(ctx context.Context) ([]byte, error) {
-	log.Println("FileReadAll:", f.Name, f.buf.Len())
+	log.Println("ReadAll:", f.Name, f.buf.Len(), f)
 	return f.buf.Bytes(), nil
 }
 
@@ -178,7 +220,6 @@ func (f *MyFile) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.Rea
 
 // only for opened file or directory
 func (f *MyFile) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.WriteResponse) error {
-	log.Println("FileWrite", f.Name, len(req.Data))
 	b := f.buf.Bytes()
 	tmp := append(b[:req.Offset], req.Data...)
 	if int(req.Offset)+len(req.Data) < len(b) {
@@ -186,34 +227,83 @@ func (f *MyFile) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.W
 	}
 	b = tmp
 	resp.Size = len(b)
+	log.Printf("Write\t%v\t%v", f, resp.Size)
 	return nil
 }
 
 func (f *MyFile) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
-	log.Println("FileOpen", f.Name)
-	path := proto.Path{Data: f.Name}
-	myfile, err := f.fs.Client.DownloadFile(context.Background(), &path)
-	if err != nil {
-		log.Println(err)
-		return nil, fuse.ENOENT
+	needDownload := f.needDownload
+	_, ok := f.fs.FileCaches[f.Name]
+	if !ok {
+		log.Println("Open\tNotCached", f.Name)
+		f.fs.FileCaches[f.Name] = f
+		needDownload = true
 	}
-
-	fileCache := &MyFile{File: myfile, Name: f.Name, fs: f.fs}
-	for _, d := range myfile.Contents {
-		fileCache.buf.WriteString(d)
+	if needDownload == false { // check last modified time
+		path := proto.Path{Data: f.Name}
+		fileInfo, err := f.fs.Client.GetFileInfo(context.Background(), &path)
+		if err != nil {
+			log.Println(err)
+			return nil, fuse.ENOENT
+		}
+		if f.File.Info.ModificationTime < fileInfo.ModificationTime {
+			needDownload = true
+			log.Println("Open\tCacheExpired", f.Name, f.File.Info.ModificationTime, fileInfo.ModificationTime)
+		} else {
+			log.Println("Open\tCacheValid", f.Name)
+		}
 	}
-	f.fs.FileCaches[f.Name] = fileCache
-	return fileCache, nil
+	if needDownload {
+		path := proto.Path{Data: f.Name}
+		myfile, err := f.fs.Client.DownloadFile(context.Background(), &path)
+		if err != nil {
+			log.Println(err)
+			return nil, fuse.ENOENT
+		}
+		f.File = myfile
+		f.buf.Reset()
+		_, err = f.buf.Write(myfile.Contents)
+		if err != nil {
+			log.Println(err)
+			return nil, fuse.ENOENT
+		}
+		f.needDownload = false
+		log.Println("Open\tDownloaded\t", f)
+	}
+	resp.Handle = fuse.HandleID(f.File.Info.Inode)
+	return f, nil
 }
 
 func (f *MyFile) Flush(ctx context.Context, req *fuse.FlushRequest) error {
-	log.Println("FileFlush", f.Name, f.buf.Len())
 	var in proto.FileData
 	in.Path = &proto.Path{Data: f.Name}
-	in.Contents = append(in.Contents, f.buf.String())
-	_, err := f.fs.Client.UploadFile(context.Background(), &in)
+	in.Contents = f.buf.Bytes()
+	response, err := f.fs.Client.UploadFile(context.Background(), &in)
 	if err != nil {
 		log.Println(err)
+		return err
+	}
+	log.Printf("Flush\t%v\t%v", f, response)
+	return nil
+}
+
+func (d *Dir) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
+	log.Printf("DirRemove\t%v", req.Name)
+	path := proto.Path{Data: req.Name}
+	result, err := d.fs.Client.RemoveFile(context.Background(), &path)
+	if err != nil || result.ErrorCode != 0 {
+		log.Println("Fail to remove %v because: %v", req.Name, err)
+		return err
+	}
+	return nil
+}
+
+func (f *MyFile) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
+	log.Printf("Remove\t%v", f.Name)
+	path := proto.Path{Data: f.Name}
+	result, err := f.fs.Client.RemoveFile(context.Background(), &path)
+	if err != nil || result.ErrorCode != 0 {
+		log.Println("Fail to remove %v because: %v", f.Name, err)
 		return err
 	}
 	return nil
