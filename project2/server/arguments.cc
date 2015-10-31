@@ -50,6 +50,7 @@ Arguments::StateType Arguments::Parse(const char* arg, StateType current_state, 
 
         // done parsing positional arguments. end parse.
 	mount_point_ = arg;
+	while (mount_point_.back() == '/') { mount_point_.pop_back(); }
 	*done = true;
 	return kReady;
     } break;

@@ -47,6 +47,7 @@ Status FileService::CreateFile(ServerContext* ctx, const Path* path,
   int ret = new_file.good() ? 0 : -1;
   int err = GetError(ret);
   result->set_error_code(err);
+  Log()->CreateFileEvent(full_path, path->data(), err);
   return Status::OK;
 }
 
@@ -182,7 +183,7 @@ bool FileService::GetOfstream(const std::string& full_path, std::ofstream* strea
 // combines suffix with the mount point to obtain the full path.
 std::string FileService::PromoteToFullPath(const std::string& suffix) const {
   static const char kSeparator = '/';
-  if (GetMountPoint().back() == kSeparator) {
+  if (suffix.front() == kSeparator) {
     return GetMountPoint() + suffix;
   } else {
     return GetMountPoint() + kSeparator + suffix;
