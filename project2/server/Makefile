@@ -33,8 +33,8 @@ proto.dummy: ../proto/file.proto
 	 ../proto/file.proto
 	touch proto.dummy
 
-filed: filed.cc arguments.o file_service.o $(PB) event_log.o
-	g++ -o filed filed.cc arguments.o file_service.o event_log.o $(PB) $(FLAGS) $(INCLUDE) $(LIBS)
+filed: filed.cc arguments.o file_service.o $(PB) event_log.o persistent_state.o
+	g++ -o filed filed.cc arguments.o file_service.o event_log.o persistent_state.o $(PB) $(FLAGS) $(INCLUDE) $(LIBS)
 
 file.pb.o: proto.dummy
 	g++ -c -o file.pb.o file.pb.cc $(FLAGS) $(INCLUDE)

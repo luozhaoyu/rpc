@@ -180,6 +180,11 @@ bool FileService::GetOfstream(const std::string& full_path, std::ofstream* strea
   return stream->good();
 }
 
+// initializes the service. particularly, ensures persistent state is up.
+bool FileService::Initialize() {
+  return persistence_.StartAndRecoverState();
+}
+
 // combines suffix with the mount point to obtain the full path.
 std::string FileService::PromoteToFullPath(const std::string& suffix) const {
   static const char kSeparator = '/';
@@ -217,23 +222,25 @@ Status FileService::UploadFile(ServerContext* ctx, const FileData* file,
     FileInfo* info) {
   assert(file != nullptr && info != nullptr);
   std::string full_path = PromoteToFullPath(file->path().data());
-  std::fstream stream(full_path, std::ios::out | std::ios::trunc);
+  PersistentState::UpdateToken token(full_path);
 
-  if (stream.bad()) {
+  if (!persistence_.CreateUpdateFile(full_path, &token)) {
     int err = -errno;
     Log()->UploadFileEvent(full_path, file->path().data(), file->contents(), err);
     info->set_error_code(err);
     return Status::OK;
   }
 
-  stream.write(file->contents().c_str(), file->contents().size());
+  token.GetStream()->write(file->contents().c_str(), file->contents().size());
 
-  if (stream.bad()) {
+  if (token.GetStream()->bad()) {
     int err = -errno;
     Log()->UploadFileEvent(full_path, file->path().data(), file->contents(), err);
     info->set_error_code(err);
     return Status::OK;
   }
+
+  persistence_.FinalizeUpdate(&token);
 
   Log()->UploadFileEvent(full_path, file->path().data(), file->contents(), 0);
   GetFileInfo(full_path, file->path().data(), false, info);

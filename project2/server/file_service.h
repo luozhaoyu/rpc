@@ -14,7 +14,7 @@ public:
   FileService(const std::string& mount_point, const std::string& persistent_dir,
     const std::string& persistent_store)
     : mount_point_(mount_point)
-    , persistence(persistent_dir, persistent_store) { }
+    , persistence_(persistent_dir, persistent_store) { }
 
   grpc::Status CreateDirectory(grpc::ServerContext* ctx, const Path* path,
     Result* result) override;
@@ -30,6 +30,8 @@ public:
 
   grpc::Status GetFileInfo(grpc::ServerContext* ctx, const Path* path,
     FileInfo* info) override;
+
+  bool Initialize();
 
   grpc::Status RemoveDirectory(grpc::ServerContext* ctx, const Path* path,
     Result* result) override;
@@ -56,7 +58,7 @@ private:
   std::string PromoteToFullPath(const std::string& suffix) const;
 
   std::string mount_point_;
-  PersistentState persistence;
+  PersistentState persistence_;
 };
 
 }
