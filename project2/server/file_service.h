@@ -5,12 +5,16 @@
 #include <grpc++/grpc++.h>
 
 #include "file.grpc.pb.h"
+#include "persistent_state.h"
 
 namespace File {
 
 class FileService : public BasicFileService::Service {
 public:
-  FileService(std::string mount_point) : mount_point_(mount_point) { }
+  FileService(const std::string& mount_point, const std::string& persistent_dir,
+    const std::string& persistent_store)
+    : mount_point_(mount_point)
+    , persistence(persistent_dir, persistent_store) { }
 
   grpc::Status CreateDirectory(grpc::ServerContext* ctx, const Path* path,
     Result* result) override;
@@ -38,7 +42,10 @@ public:
 private:
   bool FileExists(const std::string& full_path) const;
 
-  bool GetFileInfo(const std::string& full_path, FileInfo* info) const;
+  int GetError(int ret) const;
+
+  bool GetFileInfo(const std::string& full_path, const std::string& path, 
+    bool top_level, FileInfo* info) const;
 
   bool GetIfstream(const std::string& full_path, std::ifstream* stream) const;
 
@@ -49,6 +56,7 @@ private:
   std::string PromoteToFullPath(const std::string& suffix) const;
 
   std::string mount_point_;
+  PersistentState persistence;
 };
 
 }

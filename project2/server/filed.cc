@@ -2,7 +2,7 @@
 // by: allison morris
 
 #include "arguments.h"
-#include "log.h"
+#include "event_log.h"
 #include "file_service.h"
 
 using namespace File;
@@ -11,22 +11,24 @@ using grpc::ServerBuilder;
 // entry point for file server.
 int main(int argc, const char** argv) {
   Arguments args(Arguments::kServer);
-  Arguments::ErrorType err = args.Parse(argc, argv);
-  if (err != Arguments::kSuccess) {
-    args.ShowError(err);
+  args.Parse(argc, argv);
+  if (args.ShowHelp()) {
+    return 0;
+  }
+
+  if (args.ShowError()) {
     return -1;
   }
 
-  std::fstream disabled_stream;
-  Logger::Initialize(std::cerr, disabled_stream, kInfo);
+  EventLog::Initialize(std::cerr, args.GetVerbosity(), args.GetDumpFiles());
 
   std::string address = "0.0.0.0:";
   address += std::to_string(args.GetPort());
 
-  GetLog() << "Starting service for " << args.GetMountPoint() << " on " 
-    << address << "\n";
+  Log()->StartupEvent(args.GetMountPoint(), address);
 
-  FileService service(args.GetMountPoint());
+  FileService service(args.GetMountPoint(), args.GetPersistentDirectory(),
+    args.GetPersistentStoreName());
   ServerBuilder builder;
   builder.AddListeningPort(address, grpc::InsecureServerCredentials());
   builder.RegisterService(&service);

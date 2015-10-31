@@ -13,7 +13,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "file_service.h"
-#include "log.h"
+#include "event_log.h"
 
 using namespace File;
 using grpc::ServerContext;
@@ -21,14 +21,12 @@ using grpc::Status;
 
 Status FileService::CreateDirectory(ServerContext* ctx, const Path* path,
     Result* result) {
+  assert(path != nullptr && result != nullptr);
   std::string full_path = PromoteToFullPath(path->data());
-  if (mkdir(full_path.c_str(), 0755) != 0) {
-    GetLog(kInfo) << "could not create dir: " << path->data() << "\n";
-    result->set_error_code(-errno);
-  } else {
-    GetLog(kInfo) << "created dir: " << path->data() << "\n";
-    result->set_error_code(0);
-  }
+  int ret = mkdir(full_path.c_str(), 0755);
+  int err = GetError(ret);
+  Log()->CreateDirectoryEvent(full_path, path->data(), err);
+  result->set_error_code(err);
   return Status::OK;
 }
 
@@ -40,21 +38,16 @@ Status FileService::CreateFile(ServerContext* ctx, const Path* path,
 
   // cannot create if file already exists.
   if (FileExists(full_path)) {
-    GetLog(kDebug) << "request to re-create file: " << path->data() << "\n";
-    result->set_error_code(-errno);
+    Log()->CreateFileEvent(full_path, path->data(), -EEXIST);
+    result->set_error_code(-EEXIST);
     return Status::OK;
   }
 
   std::ofstream new_file(full_path, std::ios::out | std::ios::trunc);
-  if (new_file.good()) {
-    GetLog(kInfo) << "created new file: " << path->data() << "\n";
-    result->set_error_code(0);
-    return Status::OK;
-  } else {
-    GetLog(kErr) << "could not create new file: " << path->data() << "\n";
-    result->set_error_code(-errno);
-    return Status::OK;
-  }
+  int ret = new_file.good() ? 0 : -1;
+  int err = GetError(ret);
+  result->set_error_code(err);
+  return Status::OK;
 }
 
 // returns the file located by path to the client.
@@ -67,7 +60,7 @@ Status FileService::DownloadFile(ServerContext* ctx, const Path* path,
   // return invalid if file could not be opened.
   if (!GetIfstream(full_path, &stream)) {
     file->mutable_info()->set_error_code(-errno);
-    GetLog(kDebug) << "cannot send fake file:  " << path->data() << "\n";
+    Log()->DownloadFileEvent(full_path, path->data(), std::string(), -errno);
     return Status::OK;
   }
 
@@ -85,8 +78,9 @@ Status FileService::DownloadFile(ServerContext* ctx, const Path* path,
     }
   } while (!stop);
 
-  GetLog(kInfo) << "sent file: " << path->data() << "\n";
-  GetFileInfo(full_path, file->mutable_info());
+  // FIXME should check that data was written.
+  Log()->DownloadFileEvent(full_path, path->data(), file->contents(), 0);
+  GetFileInfo(full_path, path->data(), false, file->mutable_info());
   return Status::OK;
 }
 
@@ -103,8 +97,9 @@ Status FileService::GetDirectoryContents(ServerContext* ctx, const Path* path,
   DIR* dir;
   dir = opendir(full_path.c_str());
   if (dir == nullptr) {
-    GetLog(kDebug) << "cannot get info for fake dir: " << path->data() << "\n";
-    info->set_error_code(-errno);
+    int err = -errno;
+    Log()->GetDirectoryEvent(full_path, path->data(), err);
+    info->set_error_code(err);
     return Status::OK;
   }
 
@@ -115,24 +110,27 @@ Status FileService::GetDirectoryContents(ServerContext* ctx, const Path* path,
   // (entry_ptr is nullptr).
   while (readdir_r(dir, &entry, &entry_ptr) == 0 && entry_ptr != nullptr) {
     std::string* filename = info->add_contents();
-    (GetLog(kDebug) << "writing dir entry: ") << entry.d_name << "\n";
     filename->append(entry.d_name);
   }
-  closedir(dir);
+  // closedir(dir);
 
-  if (entry_ptr != nullptr) {
-    GetLog(kErr) << "could not iterate dir: " << path->data() << "\n";
-    info->set_error_code(-errno);
-  } else {
-    GetLog(kInfo) << "iterated dir: " << path->data() << "\n";
-    info->set_error_code(0);
-  }
+  int ret = entry_ptr == nullptr ? 0 : -1;
+  int err = GetError(ret);
+  closedir(dir);
+  Log()->GetDirectoryEvent(full_path, path->data(), err);
+  info->set_error_code(err);
   return Status::OK;
+}
+
+inline int FileService::GetError(int ret) const {
+  if (ret == 0) { return 0; }
+  return -errno;
 }
 
 // fills info with the access, creation, and modification times of full_path.
 // returns true on success. this does not send a message!
-bool FileService::GetFileInfo(const std::string& full_path, FileInfo* info) const {
+bool FileService::GetFileInfo(const std::string& full_path, const std::string& path, 
+    bool top_level, FileInfo* info) const {
   assert(info != nullptr);
   struct stat stat_buffer;
   int stat_result = stat(full_path.c_str(), &stat_buffer);
@@ -140,12 +138,12 @@ bool FileService::GetFileInfo(const std::string& full_path, FileInfo* info) cons
   // return that path is invalid if file cannot be stat'd.
   if (stat_result == -1) {
     info->set_error_code(-errno);
-    GetLog(kTrace) << "cannot get info for fake file: " << full_path << "\n";
+    Log()->FileInfoEvent(full_path, path, stat_buffer, -errno, top_level);
     return false;
   }
 
   // otherwise, return the access, mod, and creation times.
-  GetLog(kTrace) << "obtained info for file: " << full_path << "\n";
+  Log()->FileInfoEvent(full_path, path, stat_buffer, 0, top_level);
   info->set_error_code(0);
   info->set_mode(stat_buffer.st_mode);
   info->set_access_time(stat_buffer.st_atime);
@@ -161,11 +159,7 @@ Status FileService::GetFileInfo(ServerContext* ctx, const Path* path,
     FileInfo* info) {
   assert(path != nullptr && info != nullptr);
   std::string full_path = PromoteToFullPath(path->data());
-  if (!GetFileInfo(full_path, info)) {
-    GetLog(kDebug) << "cannot send info for fake file: " << path->data()<< "\n";
-  } else {
-    GetLog(kInfo) << "sent info for file: " << path->data() << "\n";
-  }
+  GetFileInfo(full_path, path->data(), true, info);
   return Status::OK;
 }
 
@@ -173,7 +167,6 @@ Status FileService::GetFileInfo(ServerContext* ctx, const Path* path,
 // stream->good().
 bool FileService::GetIfstream(const std::string& full_path, std::ifstream* stream) const {
   assert(stream != nullptr);
-  GetLog(kTrace) << "opening ifstream: " << full_path << "\n";
   stream->open(full_path, std::ios::in);
   return stream->good();
 }
@@ -182,7 +175,6 @@ bool FileService::GetIfstream(const std::string& full_path, std::ifstream* strea
 // stream->good().
 bool FileService::GetOfstream(const std::string& full_path, std::ofstream* stream) const {
   assert(stream != nullptr);
-  GetLog(kTrace) << "opening ofstream: " << full_path << "\n";
   stream->open(full_path, std::ios::out);
   return stream->good();
 }
@@ -201,13 +193,10 @@ Status FileService::RemoveDirectory(ServerContext* ctx, const Path* path,
     Result* result) {
   assert(path != nullptr && result != nullptr);
   std::string full_path = PromoteToFullPath(path->data());
-  if (rmdir(full_path.c_str()) != 0) {
-    GetLog(kInfo) << "could not remove dir: " << path->data() << "\n";
-    result->set_error_code(-errno);
-  } else {
-    GetLog(kInfo) << "removed dir: " << path->data() << "\n";
-    result->set_error_code(0);
-  }
+  int ret = rmdir(full_path.c_str());
+  int err = GetError(ret);
+  Log()->RemoveDirectoryEvent(full_path, path->data(), err);
+  result->set_error_code(err);
   return Status::OK;
 }
 
@@ -215,14 +204,10 @@ Status FileService::RemoveFile(ServerContext* ctx, const Path* path,
     Result* result) {
   assert(path != nullptr && result != nullptr);
   std::string full_path = PromoteToFullPath(path->data());
-  if (std::remove(full_path.c_str()) != 0) {
-    GetLog(kInfo) << "could not remove file: " << path->data() << "\n";
-    result->set_error_code(-errno);
-    return Status::OK;
-  }
-
-  GetLog(kInfo) << "removed file: " << path->data() << "\n";
-  result->set_error_code(0);
+  int ret = std::remove(full_path.c_str());
+  int err = GetError(ret);
+  Log()->RemoveFileEvent(full_path, path->data(), err);
+  result->set_error_code(err);
   return Status::OK;
 }
 
@@ -234,20 +219,22 @@ Status FileService::UploadFile(ServerContext* ctx, const FileData* file,
   std::fstream stream(full_path, std::ios::out | std::ios::trunc);
 
   if (stream.bad()) {
-    GetLog(kErr) << "could not put file: " << file->path().data() << "\n";
-    info->set_error_code(-errno);
+    int err = -errno;
+    Log()->UploadFileEvent(full_path, file->path().data(), file->contents(), err);
+    info->set_error_code(err);
     return Status::OK;
   }
 
   stream.write(file->contents().c_str(), file->contents().size());
 
   if (stream.bad()) {
-    GetLog(kErr) << "error writing file: " << file->path().data() << "\n";
-    info->set_error_code(-errno);
+    int err = -errno;
+    Log()->UploadFileEvent(full_path, file->path().data(), file->contents(), err);
+    info->set_error_code(err);
     return Status::OK;
   }
 
-  GetFileInfo(full_path, info);
-  GetLog(kInfo) << "put file: " << file->path().data() << "\n";
+  Log()->UploadFileEvent(full_path, file->path().data(), file->contents(), 0);
+  GetFileInfo(full_path, file->path().data(), false, info);
   return Status::OK;
 }
