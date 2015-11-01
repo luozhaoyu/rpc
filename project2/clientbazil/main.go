@@ -3,8 +3,12 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
+	"encoding/gob"
 	"flag"
 	"fmt"
+	"hash/crc32"
+	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -31,23 +35,75 @@ func NewGrpcClient(ip string) proto.BasicFileServiceClient {
 	return c
 }
 
-func recover(path string, info os.FileInfo, err error) error {
-	log.Println(path, err, "need recover")
+func (f *MyFS) recover(path string, info os.FileInfo, err error) error {
+	if path == f.cachePath { // hack
+		return nil
+	}
+	if err != nil {
+		log.Println("CacheFolderWalkError\t", path, info, err)
+		return err
+	}
+
+	fileName, err := base64.StdEncoding.DecodeString(info.Name())
+	if err != nil {
+		log.Println("FailDecodePath", path, info.Name(), err)
+		return err
+	}
+	var buf bytes.Buffer
+	var brokenFile MyFile
+	data, err := ioutil.ReadFile(path)
+	if err != nil {
+		log.Println("FailReadCache", path, string(fileName), err)
+		return err
+	}
+	n, err := buf.Write(data)
+	if err != nil || n < len(data) {
+		log.Println("FailWriteBuf", path, string(fileName), err)
+		return err
+	}
+	dec := gob.NewDecoder(&buf)
+	if err := dec.Decode(&brokenFile); err != nil {
+		log.Println("FailDecodeFile", path, string(fileName), err)
+		return err
+	}
+	brokenFile.fs = f
+	brokenFile.buf.Reset()
+	if n, err := brokenFile.buf.Write(brokenFile.Data); err != nil || n < len(brokenFile.Data) {
+		log.Println("FileCopyError", err, brokenFile.buf)
+		return err
+	}
+	log.Println("Recovered:", path, string(fileName), info.Size(), brokenFile.File, brokenFile.buf.String(), brokenFile.Parent)
+	f.FileCaches[brokenFile.FilePath] = &brokenFile
+
+	// remove after success
+	if !doCrash {
+		if err := os.Remove(path); err != nil {
+			log.Println("FailInRemove:", path)
+			return err
+		}
+	}
 	return nil
 }
 
-func diagnose(cachePath string) error {
-	log.Printf("Checking cache folder: %v...", cachePath)
-	err := filepath.Walk(cachePath, recover)
+func (f *MyFS) diagnose() error {
+	log.Printf("Checking cache folder: %v...", f.cachePath)
+	err := filepath.Walk(f.cachePath, f.recover)
+	if err != nil {
+		log.Fatal(err)
+		return err
+	}
 	log.Println("Recovery check finished")
-	return err
+	return nil
 }
+
+var doCrash bool
 
 func main() {
 	var mountPoint, cachePath, ip string
 	flag.StringVar(&mountPoint, "m", "root", "path you want to mount AFS")
 	flag.StringVar(&cachePath, "c", "cache", "cache files for write operations")
 	flag.StringVar(&ip, "server", "localhost:61512", "server address")
+	flag.BoolVar(&doCrash, "crash", false, "do crash demo or not:\nthis would disable donwload files from server and prevent delete cache files")
 	flag.Parse()
 
 	c, err := fuse.Mount(
@@ -61,16 +117,17 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = diagnose(cachePath)
+	log.Printf("MountPath: %s, CachePath: %s\n", mountPoint, cachePath)
+	myfs := &MyFS{
+		cachePath:  cachePath,
+		Client:     NewGrpcClient(ip),
+		FileCaches: make(map[string]*MyFile)}
+	err = myfs.diagnose()
 	if err != nil {
 		log.Println(err)
 	}
-	log.Printf("MountPath: %s, CachePath: %s\n", mountPoint, cachePath)
 
-	err = fs.Serve(c, &MyFS{
-		cachePath:  cachePath,
-		Client:     NewGrpcClient(ip),
-		FileCaches: make(map[string]*MyFile)})
+	err = fs.Serve(c, myfs)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -84,17 +141,22 @@ func main() {
 
 // FS implements the hello world file system.
 type MyFS struct {
+	root       *MyFile
 	cachePath  string
 	Client     proto.BasicFileServiceClient
 	FileCaches map[string]*MyFile
 }
 
 func (f *MyFS) Root() (fs.Node, error) {
-	return &MyFile{
-		Name:   "/",
-		parent: nil,
-		fs:     f,
-		buf:    bytes.NewBuffer([]byte{})}, nil
+	if f.root == nil {
+		root := &MyFile{
+			Name:   "/",
+			Parent: nil,
+			fs:     f,
+			buf:    *bytes.NewBuffer([]byte{})}
+		f.root = root
+	}
+	return f.root, nil
 }
 
 func (f *MyFile) Lookup(ctx context.Context, name string) (fs.Node, error) {
@@ -109,14 +171,14 @@ func (f *MyFile) Lookup(ctx context.Context, name string) (fs.Node, error) {
 		}
 		log.Println("Lookup:", filePath, "\tinit&response:", fileInfo)
 		f.fs.FileCaches[filePath] = &MyFile{
-			needDownload: true,
+			NeedDownload: true,
 			Name:         name,
-			parent:       f,
+			Parent:       f,
 			fs:           f.fs,
-			buf:          bytes.NewBuffer([]byte{}),
+			buf:          *bytes.NewBuffer([]byte{}),
 			File:         &proto.File{Info: fileInfo}}
 	}
-	log.Printf("Lookup:%v\t%v", filePath, f.fs.FileCaches[filePath])
+	log.Printf("Lookup:%v\t%v", filePath, f.fs.FileCaches[filePath].File.Info)
 	return f.fs.FileCaches[filePath], nil
 }
 
@@ -128,7 +190,6 @@ func (f *MyFile) ReadDirAll(ctx context.Context) (c []fuse.Dirent, err error) {
 		log.Fatal(err)
 	}
 	for _, fileInfo := range dirInfo.Contents {
-		//log.Println(name, fileInfo)
 		c = append(c, fuse.Dirent{Name: fileInfo})
 	}
 	log.Println("ReadDirAll:", f, dirInfo.Contents)
@@ -137,19 +198,25 @@ func (f *MyFile) ReadDirAll(ctx context.Context) (c []fuse.Dirent, err error) {
 
 // File implements both Node and Handle for the hello file.
 type MyFile struct {
-	*proto.File
+	File         *proto.File
 	Name         string
-	parent       *MyFile
+	Data         []byte
+	FilePath     string
+	Parent       *MyFile
 	fs           *MyFS
-	buf          *bytes.Buffer
-	needDownload bool
+	buf          bytes.Buffer
+	NeedDownload bool
+	LastChecksum uint32
+}
+
+type MyFileData struct {
 }
 
 func (f MyFile) getPath() string {
-	if f.parent == nil {
+	if f.Parent == nil {
 		return f.Name
 	}
-	return filepath.Join(f.parent.getPath(), f.Name)
+	return filepath.Join(f.Parent.getPath(), f.Name)
 }
 
 func (f *MyFile) Attr(ctx context.Context, a *fuse.Attr) error {
@@ -166,7 +233,7 @@ func (f *MyFile) Attr(ctx context.Context, a *fuse.Attr) error {
 		f.fs.FileCaches[filePath] = f
 		log.Println("Attr:", filePath, "\tAttrFetched\t", f.File.Info)
 	} else {
-		log.Println("Attr:", filePath, "\tHasCache", f.File.Info)
+		log.Println("Attr:", filePath, "\tHasCache\tMTime:", f.File.Info.ModificationTime)
 	}
 	a.Inode = f.File.Info.Inode
 	if f.File.Info.Mode&0170000 == 0040000 {
@@ -174,8 +241,6 @@ func (f *MyFile) Attr(ctx context.Context, a *fuse.Attr) error {
 	} else { // by default is regulare file, include newly created file
 		a.Mode = 0644
 	}
-	//a.Mode = os.FileMode(uint32(f.File.Info.Mode) | 0644)
-	//a.Mode = os.FileMode(uint32(f.File.Info.Mode))
 	log.Println(filePath, "IsDir:", a.Mode.IsDir(), a.Mode.IsRegular(), a.Mode, f.File.Info.Mode, uint32(a.Mode))
 	a.Uid = 20001 // zhaoyu
 	a.Size = f.File.Info.Size
@@ -205,16 +270,16 @@ func (f *MyFile) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.W
 	nbuf := new(bytes.Buffer)
 	if int(req.FileFlags) == os.O_WRONLY {
 		nbuf.Write(req.Data)
-		log.Println("Write:", f.getPath(), "WriteOnly", req.FileFlags, req.Flags, req.Offset, len(req.Data), " -> ", f.buf.Len())
+		log.Println("Write:", f.getPath(), "WriteOnly", req.FileFlags, req.Flags, req.Offset, len(req.Data), " -> ", nbuf.Len())
 	} else {
 		nbuf.Write(tmp[:req.Offset])
 		nbuf.Write(req.Data)
 		if int(req.Offset)+len(req.Data) < len(tmp) {
 			nbuf.Write(tmp[int(req.Offset)+len(req.Data):])
 		}
-		log.Println("Write:", f.getPath(), "ReadWrite", req.FileFlags, req.Flags, req.Offset, len(req.Data), " -> ", f.buf.Len())
+		log.Println("Write:", f.getPath(), "ReadWrite", req.FileFlags, req.Flags, req.Offset, len(req.Data), " -> ", nbuf.Len())
 	}
-	f.buf = nbuf
+	f.buf = *nbuf
 	resp.Size = len(req.Data)
 	f.File.Info.Size = uint64(f.buf.Len())
 	f.File.Info.ModificationTime = uint64(time.Now().Unix())
@@ -222,15 +287,15 @@ func (f *MyFile) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.W
 }
 
 func (f *MyFile) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
-	needDownload := f.needDownload
+	NeedDownload := f.NeedDownload
 	filePath := f.getPath()
 	_, ok := f.fs.FileCaches[filePath]
 	if !ok {
 		log.Println("Open:", filePath, "\tNotCached")
 		f.fs.FileCaches[filePath] = f
-		needDownload = true
+		NeedDownload = true
 	}
-	if needDownload == false { // check last modified time
+	if NeedDownload == false { // check last modified time
 		path := proto.Path{Data: filePath}
 		fileInfo, err := f.fs.Client.GetFileInfo(context.Background(), &path)
 		if err != nil {
@@ -238,13 +303,13 @@ func (f *MyFile) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.Ope
 			return nil, fuse.ENOENT
 		}
 		if f.File.Info.ModificationTime < fileInfo.ModificationTime {
-			needDownload = true
+			NeedDownload = true
 			log.Println("Open:", filePath, "\tCacheExpiredFetchServer:", f.File.Info.ModificationTime, fileInfo.ModificationTime)
 		} else {
-			log.Println("Open:", filePath, "\tCacheValidDoLocal")
+			log.Println("Open:", filePath, "\tCacheValidNoDownload")
 		}
 	}
-	if needDownload {
+	if NeedDownload && !doCrash {
 		path := proto.Path{Data: filePath}
 		myfile, err := f.fs.Client.DownloadFile(context.Background(), &path)
 		if err != nil {
@@ -258,7 +323,9 @@ func (f *MyFile) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.Ope
 			log.Println(err)
 			return nil, fuse.ENOENT
 		}
-		f.needDownload = false
+		f.NeedDownload = false
+		// the only place needs to calculate crc32
+		f.LastChecksum = crc32.ChecksumIEEE(f.buf.Bytes())
 		log.Println("Open:", filePath, "\tFetchedServer\t")
 	}
 	f.File.Info.AccessTime = uint64(time.Now().Unix())
@@ -267,7 +334,23 @@ func (f *MyFile) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.Ope
 }
 
 func (f *MyFile) Flush(ctx context.Context, req *fuse.FlushRequest) error {
-	log.Println("Flush:", f.getPath(), "\tto cache folder")
+	filePath := f.getPath()
+	cacheFileName := base64.StdEncoding.EncodeToString([]byte(filePath))
+	cacheFilePath := filepath.Join(f.fs.cachePath, cacheFileName)
+	f.Data = f.buf.Bytes()
+	f.FilePath = filePath
+	var buf bytes.Buffer
+	enc := gob.NewEncoder(&buf)
+	if err := enc.Encode(f); err != nil {
+		log.Println(err)
+		return err
+	}
+	err := ioutil.WriteFile(cacheFilePath, buf.Bytes(), 0644)
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+	log.Println("Flush:", f.getPath(), "\tTo", cacheFileName, buf.Len())
 	return nil
 }
 
@@ -285,15 +368,21 @@ func (f *MyFile) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 }
 
 func (f *MyFile) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
-	var in proto.FileData
-	in.Path = &proto.Path{Data: f.getPath()}
-	in.Contents = f.buf.Bytes()
-	response, err := f.fs.Client.UploadFile(context.Background(), &in)
-	if err != nil {
-		log.Println(err)
-		return err
+	newChecksum := crc32.ChecksumIEEE(f.buf.Bytes())
+	if newChecksum == f.LastChecksum {
+		log.Printf("Release:%v\tNoChangeNoUpload", f.getPath())
+	} else {
+		var in proto.FileData
+		in.Path = &proto.Path{Data: f.getPath()}
+		in.Contents = f.buf.Bytes()
+		response, err := f.fs.Client.UploadFile(context.Background(), &in)
+		if err != nil || response.ErrorCode != 0 {
+			log.Println(err, response)
+			return err
+		}
+		f.LastChecksum = newChecksum
+		log.Printf("Release:%v\tUpload %v B", f.getPath(), f.buf.Len())
 	}
-	log.Printf("Release:%v\tReq:%v\tLen():%v\tResp:%v", f.getPath(), req, f.buf.Len(), response)
 	return nil
 }
 
@@ -305,7 +394,7 @@ func (f *MyFile) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse
 		log.Printf("Fail to create %v because: %v %v", filePath, err, result.ErrorCode)
 		return nil, nil, err
 	}
-	// get fileinfo into cache
+	// fetch fileinfo into cache
 	fileInfo, err := f.fs.Client.GetFileInfo(context.Background(), &path)
 	if err != nil || fileInfo.ErrorCode != 0 {
 		log.Println("GetFileInfo fail\t", filePath, err, fileInfo)
@@ -313,11 +402,11 @@ func (f *MyFile) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse
 	}
 
 	f.fs.FileCaches[filePath] = &MyFile{
-		needDownload: true,
+		NeedDownload: true,
 		Name:         req.Name,
-		parent:       f,
+		Parent:       f,
 		fs:           f.fs,
-		buf:          bytes.NewBuffer([]byte{}),
+		buf:          *bytes.NewBuffer([]byte{}),
 		File:         &proto.File{Info: fileInfo}}
 	log.Println("FileCreate:", filePath, f.fs.FileCaches[filePath])
 	return f.fs.FileCaches[filePath], f.fs.FileCaches[filePath], nil
@@ -340,11 +429,11 @@ func (f *MyFile) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, er
 	}
 
 	f.fs.FileCaches[filePath] = &MyFile{
-		needDownload: true,
+		NeedDownload: true,
 		Name:         req.Name,
-		parent:       f,
+		Parent:       f,
 		fs:           f.fs,
-		buf:          bytes.NewBuffer([]byte{}),
+		buf:          *bytes.NewBuffer([]byte{}),
 		File:         &proto.File{Info: fileInfo}}
 	return f.fs.FileCaches[filePath], nil
 }

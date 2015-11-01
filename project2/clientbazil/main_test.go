@@ -18,7 +18,7 @@ func TestTouchAndWriteFile(t *testing.T) {
 	out, err := exec.Command("rm", "-rf", "root/*").Output()
 	out, err = exec.Command("touch", "root/a").Output()
 	CheckError(err, t)
-	err = ioutil.WriteFile("root/a", []byte("FileCRUD seems OK"), 0644)
+	err = ioutil.WriteFile("root/a", []byte("File Creation and Write seems OK"), 0644)
 	CheckError(err, t)
 	out, err = exec.Command("cat", "root/a").Output()
 	t.Log(string(out))
