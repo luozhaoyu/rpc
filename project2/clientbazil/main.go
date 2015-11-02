@@ -192,7 +192,7 @@ func (f *MyFile) ReadDirAll(ctx context.Context) (c []fuse.Dirent, err error) {
 	for _, fileInfo := range dirInfo.Contents {
 		c = append(c, fuse.Dirent{Name: fileInfo})
 	}
-	log.Println("ReadDirAll:", f, dirInfo.Contents)
+	log.Println("ReadDirAll:", f.getPath(), dirInfo.Contents)
 	return c, err
 }
 
@@ -268,16 +268,15 @@ func (f *MyFile) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.Rea
 func (f *MyFile) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.WriteResponse) error {
 	tmp := f.buf.Bytes()
 	nbuf := new(bytes.Buffer)
-	if int(req.FileFlags) == os.O_WRONLY {
-		nbuf.Write(req.Data)
-		log.Println("Write:", f.getPath(), "WriteOnly", req.FileFlags, req.Flags, req.Offset, len(req.Data), " -> ", nbuf.Len())
-	} else {
+	if req.FileFlags == fuse.OpenReadWrite || req.FileFlags == fuse.OpenWriteOnly {
 		nbuf.Write(tmp[:req.Offset])
 		nbuf.Write(req.Data)
 		if int(req.Offset)+len(req.Data) < len(tmp) {
 			nbuf.Write(tmp[int(req.Offset)+len(req.Data):])
 		}
-		log.Println("Write:", f.getPath(), "ReadWrite", req.FileFlags, req.Flags, req.Offset, len(req.Data), " -> ", nbuf.Len())
+		log.Println("Write:", f.getPath(), req.FileFlags, req.Flags, req.Offset, len(req.Data), " -> ", nbuf.Len())
+	} else {
+		log.Println("Write:", f.getPath(), "\tStrangeFileFlags\t", req.FileFlags, req.Flags, req.Offset, len(req.Data))
 	}
 	f.buf = *nbuf
 	resp.Size = len(req.Data)
@@ -287,11 +286,13 @@ func (f *MyFile) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.W
 }
 
 func (f *MyFile) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
+	var msg string
+	startTime := time.Now()
 	NeedDownload := f.NeedDownload
 	filePath := f.getPath()
 	_, ok := f.fs.FileCaches[filePath]
 	if !ok {
-		log.Println("Open:", filePath, "\tNotCached")
+		msg = "NotCached"
 		f.fs.FileCaches[filePath] = f
 		NeedDownload = true
 	}
@@ -304,9 +305,9 @@ func (f *MyFile) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.Ope
 		}
 		if f.File.Info.ModificationTime < fileInfo.ModificationTime {
 			NeedDownload = true
-			log.Println("Open:", filePath, "\tCacheExpiredFetchServer:", f.File.Info.ModificationTime, fileInfo.ModificationTime)
+			msg = "CacheExpiredFetchServer"
 		} else {
-			log.Println("Open:", filePath, "\tCacheValidNoDownload")
+			msg = "CacheValidNoDownload"
 		}
 	}
 	if NeedDownload && !doCrash {
@@ -326,10 +327,11 @@ func (f *MyFile) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.Ope
 		f.NeedDownload = false
 		// the only place needs to calculate crc32
 		f.LastChecksum = crc32.ChecksumIEEE(f.buf.Bytes())
-		log.Println("Open:", filePath, "\tFetchedServer\t")
+		msg = "FetchedServer"
 	}
 	f.File.Info.AccessTime = uint64(time.Now().Unix())
 	resp.Handle = fuse.HandleID(f.File.Info.Inode)
+	log.Printf("Open: %v\t%v\t%v\t%v", filePath, time.Now().Sub(startTime), msg, f.LastChecksum)
 	return f, nil
 }
 
@@ -350,7 +352,7 @@ func (f *MyFile) Flush(ctx context.Context, req *fuse.FlushRequest) error {
 		log.Println(err)
 		return err
 	}
-	log.Println("Flush:", f.getPath(), "\tTo", cacheFileName, buf.Len())
+	log.Println("Flush:", f.getPath(), req.Flags, "\tTo", cacheFileName, buf.Len())
 	return nil
 }
 
@@ -368,20 +370,32 @@ func (f *MyFile) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 }
 
 func (f *MyFile) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
+	filePath := f.getPath()
+	path := proto.Path{Data: filePath}
+	fileInfo, err := f.fs.Client.GetFileInfo(context.Background(), &path)
+	if err != nil {
+		log.Println(err)
+		return fuse.ENOENT
+	}
+
 	newChecksum := crc32.ChecksumIEEE(f.buf.Bytes())
-	if newChecksum == f.LastChecksum {
-		log.Printf("Release:%v\tNoChangeNoUpload", f.getPath())
+	if f.File.Info.ModificationTime < fileInfo.ModificationTime {
+		log.Printf("Release:%v\tWARNING\tLocalFileExpireNoUpload", filePath)
 	} else {
-		var in proto.FileData
-		in.Path = &proto.Path{Data: f.getPath()}
-		in.Contents = f.buf.Bytes()
-		response, err := f.fs.Client.UploadFile(context.Background(), &in)
-		if err != nil || response.ErrorCode != 0 {
-			log.Println(err, response)
-			return err
+		if newChecksum == f.LastChecksum {
+			log.Printf("Release:%v\tNoChangeNoUpload\t%v\t%v", filePath, f.LastChecksum, newChecksum)
+		} else {
+			var in proto.FileData
+			in.Path = &proto.Path{Data: filePath}
+			in.Contents = f.buf.Bytes()
+			response, err := f.fs.Client.UploadFile(context.Background(), &in)
+			if err != nil || response.ErrorCode != 0 {
+				log.Println(err, response)
+				return err
+			}
+			f.LastChecksum = newChecksum
+			log.Printf("Release:%v\tUpload %v B", filePath, f.buf.Len())
 		}
-		f.LastChecksum = newChecksum
-		log.Printf("Release:%v\tUpload %v B", f.getPath(), f.buf.Len())
 	}
 	return nil
 }
