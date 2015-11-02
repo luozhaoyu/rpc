@@ -37,9 +37,9 @@ public:
     , fuse_args_(2)
     , verbosity_(kInfo)
     , server_name_("localhost")
-    , cache_directory_("~/.file")
-    , persistent_directory_("~/.filed")
-    , persistent_store_name_("~/.filed-store")
+    , cache_directory_("file-cache")
+    , persistent_directory_("filed-dir")
+    , persistent_store_name_("filed-log")
     { }
 
   const std::string& GetCacheDirectory() const { return cache_directory_; }

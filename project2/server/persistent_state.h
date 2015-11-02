@@ -48,8 +48,12 @@ public:
   };
 
   PersistentState(const std::string& root, const std::string& store_path) : 
-    root_dir_(root), store_name_(store_path), 
-    store_(store_path, std::ios::out | std::ios::trunc), next_id_(0) { }
+      root_dir_(root), store_name_(store_path), 
+      store_(), next_id_(0) {
+    if (root_dir_.back() != '/') {
+      root_dir_ += '/';
+    }
+  }
 
   bool CreatePersistentPath(UpdateToken* token);
   

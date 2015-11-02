@@ -166,6 +166,26 @@ void EventLog::HandleGoodErrors(const std::string& cmd, const std::string& full_
   }
 }
 
+void EventLog::PersistentDirectoryEvent(const std::string& path, bool exists, int err) {
+  Lock lock;
+  if (level_ >= kInfo) {
+    out_ << (exists ? "OK PersistentDirectory " : "ERR PersistentDirectory ");
+    out_ << path;
+    if (level_ >= kDebug && !exists) { out_ << " error code: " << err; }
+    out_ << "\n";
+  }
+}
+
+void EventLog::PersistentStartEvent(bool old_log, bool bad_entry, bool log_good) {
+  Lock lock;
+  if (level_ >= kInfo) {
+    out_ << (log_good ? "OK PersistentStart " : "ERR PersistentStart ");
+    out_ << (old_log ? "found old log " : "no old log ");
+    out_ << (bad_entry ? "with bad entries " : "with no errors ");
+    out_ << "\n";
+  }
+}
+
 void EventLog::RemoveDirectoryEvent(const std::string& full_path, const std::string& path,int err) {
   Lock lock;
   if (level_ >= kInfo) {

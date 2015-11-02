@@ -121,13 +121,13 @@ bool Arguments::ShowHelp() const {
   if (!show_help_) { return false; }
 
   if (IsClient()) {
-    std::cout << "Usage: " << GetExecutable() << "[-p port] [-D cache_dir] "
+    std::cout << "Usage: " << GetExecutable() << " [-p port] [-D cache_dir] "
       "server mount_point";
   } else {
-    std::cout << "Usage: " << GetExecutable() << "[options] mount_point\nOptions:\n"
+    std::cout << "Usage: " << GetExecutable() << " [options] mount_point\nOptions:\n"
       "    -h     Display this message.\n"
       "    -p n   Listen on port n for client connections.\n"
-      "    -D s   Use s as the cache directory. This is called the persistent directory.\n";
+      "    -D s   Use s as the cache directory. This is called the persistent directory.\n"
       "    -P s   Use s as the location of the persistent store log.\n"
       "    -V n   Set verbosity to level n. Levels are [0, 4]. Default is 1.\n"
       "    -d     Dump file contents to logs.\n"
