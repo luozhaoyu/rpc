@@ -13,6 +13,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"golang.org/x/net/context"
@@ -98,6 +99,7 @@ func (f *MyFS) diagnose() error {
 }
 
 var doCrash bool
+var verbose bool
 
 func main() {
 	var mountPoint, cachePath, ip string
@@ -105,6 +107,7 @@ func main() {
 	flag.StringVar(&cachePath, "c", "cache", "cache files for write operations")
 	flag.StringVar(&ip, "server", "localhost:61512", "server address")
 	flag.BoolVar(&doCrash, "crash", false, "do crash demo or not:\nthis would disable donwload files from server and prevent delete cache files")
+	flag.BoolVar(&verbose, "verbose", false, "Print more output, especially for Write()")
 	flag.Parse()
 
 	c, err := fuse.Mount(
@@ -161,6 +164,9 @@ func (f *MyFS) Root() (fs.Node, error) {
 }
 
 func (f *MyFile) Lookup(ctx context.Context, name string) (fs.Node, error) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
 	filePath := filepath.Join(f.getPath(), name)
 	_, ok := f.fs.FileCaches[filePath]
 	if !ok {
@@ -208,6 +214,7 @@ type MyFile struct {
 	buf          bytes.Buffer
 	NeedDownload bool
 	LastChecksum uint32
+	lock         sync.Mutex
 }
 
 type MyFileData struct {
@@ -221,6 +228,9 @@ func (f MyFile) getPath() string {
 }
 
 func (f *MyFile) Attr(ctx context.Context, a *fuse.Attr) error {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
 	filePath := f.getPath()
 	_, ok := f.fs.FileCaches[filePath]
 	if !ok || f.File == nil || f.File.Info == nil {
@@ -254,13 +264,16 @@ func (f *MyFile) Attr(ctx context.Context, a *fuse.Attr) error {
 
 // only for opened file or directory
 func (f *MyFile) ReadAll(ctx context.Context) ([]byte, error) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
 	log.Println("ReadAll:", f.getPath(), f.buf.Len())
 	f.File.Info.AccessTime = uint64(time.Now().Unix())
 	return f.buf.Bytes(), nil
 }
 
 func (f *MyFile) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
-	log.Println("FileRead:", f.getPath())
+	log.Fatal("FileRead:", f.getPath())
 	f.File.Info.AccessTime = uint64(time.Now().Unix())
 	return nil
 }
@@ -287,7 +300,9 @@ func WriteAt(buf *bytes.Buffer, data []byte, offset int) error {
 func (f *MyFile) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.WriteResponse) error {
 	if req.FileFlags == fuse.OpenReadWrite || req.FileFlags == fuse.OpenWriteOnly {
 		err := WriteAt(&f.buf, req.Data, int(req.Offset))
-		log.Println("Write:", f.getPath(), req.FileFlags, req.Flags, req.Offset, len(req.Data), " -> ", f.buf.Len())
+		if verbose {
+			log.Println("Write:", f.getPath(), req.FileFlags, req.Flags, req.Offset, len(req.Data), " -> ", f.buf.Len())
+		}
 		if err != nil {
 			return fuse.EIO
 		}
@@ -301,6 +316,9 @@ func (f *MyFile) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.W
 }
 
 func (f *MyFile) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
 	var msg string
 	startTime := time.Now()
 	NeedDownload := f.NeedDownload
@@ -368,6 +386,10 @@ func (f *MyFile) Flush(ctx context.Context, req *fuse.FlushRequest) error {
 		return err
 	}
 	log.Println("Flush:", f.getPath(), f.buf.Len(), "\tflag:", req.Flags, "\tTo", cacheFileName, buf.Len())
+	go func() {
+		log.Println("AsyncRelease\t", filePath, f.buf.Len())
+		f.Release(nil, nil)
+	}()
 	return nil
 }
 
@@ -385,6 +407,9 @@ func (f *MyFile) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 }
 
 func (f *MyFile) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
 	filePath := f.getPath()
 	path := proto.Path{Data: filePath}
 	fileInfo, err := f.fs.Client.GetFileInfo(context.Background(), &path)
@@ -416,6 +441,9 @@ func (f *MyFile) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
 }
 
 func (f *MyFile) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.CreateResponse) (fs.Node, fs.Handle, error) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
 	filePath := filepath.Join(f.getPath(), req.Name)
 	path := proto.Path{Data: filePath}
 	result, err := f.fs.Client.CreateFile(context.Background(), &path)
