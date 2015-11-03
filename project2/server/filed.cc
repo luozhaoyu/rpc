@@ -29,7 +29,10 @@ int main(int argc, const char** argv) {
 
   FileService service(args.GetMountPoint(), args.GetPersistentDirectory(),
     args.GetPersistentStoreName());
-  service.Initialize();
+  if (!service.Initialize()) {
+    return -1;
+  }
+
   ServerBuilder builder;
   builder.AddListeningPort(address, grpc::InsecureServerCredentials());
   builder.RegisterService(&service);

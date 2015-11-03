@@ -2,9 +2,11 @@
 // by: allison morris
 
 #include <cassert>
+#include <cerrno>
 #include <cstdio>
 #include <set>
 #include <sys/stat.h>
+#include "event_log.h"
 #include "persistent_state.h"
 
 using namespace File;
@@ -23,8 +25,9 @@ bool PersistentState::CreateUpdateFile(const std::string& full_path, UpdateToken
     return false;
   }
 
-  token->GetStream()->open(token->GetPersistentPath(), std::ios::in);
-  if (token->GetStream()->bad()) {
+  token->GetStream()->open(token->GetPersistentPath(), std::ios::out);
+  if (!token->GetStream()->good()) {
+    std::cerr << "WTF CreateUpdateFile fuqqqqq " << token->GetPersistentPath() << "\n";
     return false;
   }
 
@@ -69,6 +72,7 @@ bool PersistentState::FinalizeUpdate(UpdateToken* token) {
   struct stat st_buffer;
   int err = stat(token->GetPersistentPath().c_str(), &st_buffer);
   if (err != 0) {
+    std::cerr << "WTF no log for " << token->GetPersistentPath() << " " << -errno << "\n";
     return false;
   }
 
@@ -91,14 +95,24 @@ void PersistentState::Transaction::SetIdFromPath(std::string path) {
 }
 
 // reads the log, fixes up any file transactions that have not been completed,
-// closes and re-opens the log for writing. returns true if log parsing
-// is performed successfully, or if there is no log.
+// closes and re-opens the log for writing. returns true if start-up has
+// completed successfully. 
 bool PersistentState::StartAndRecoverState() {
+  // check persistent directory exists, or attempt to create it...
+  struct stat st_buf;
+  int dir_exists = stat(root_dir_.c_str(), &st_buf);
+  if (dir_exists != 0 || !S_ISDIR(st_buf.st_mode)) {
+    dir_exists = mkdir(root_dir_.c_str(), 0777);
+  }
+  Log()->PersistentDirectoryEvent(root_dir_, dir_exists == 0, -errno);
+  if (dir_exists != 0) {return false; }
+
   std::ifstream last_log(store_name_);
   if (last_log.bad()) {
     last_log.close();
     store_.open(store_name_, std::ios::out | std::ios::trunc);
-    return true;
+    Log()->PersistentStartEvent(false, true, store_.good());
+    return store_.good();
   }
 
   std::set<Transaction> started_transactions;
@@ -134,5 +148,6 @@ bool PersistentState::StartAndRecoverState() {
   }
   last_log.close();
   store_.open(store_name_, std::ios::out | std::ios::trunc);
-  return bad_entry;
+  Log()->PersistentStartEvent(true, bad_entry, store_.good());
+  return store_.good();
 }

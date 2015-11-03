@@ -33,7 +33,11 @@ public:
   static void Initialize(std::ostream& out, LogLevel lvl, bool dump) {
     logger_ = new EventLog(out, lvl, dump);
   }
-  
+
+  void PersistentDirectoryEvent(const std::string& path, bool exists, int err);
+   
+  void PersistentStartEvent(bool old_log, bool bad_entry, bool log_good);
+
   void RemoveDirectoryEvent(const std::string& full_path, const std::string& path, int err);
   void RemoveFileEvent(const std::string& full_path, const std::string& path, int err);
   void StartupEvent(const std::string& mount_point, const std::string& address);
