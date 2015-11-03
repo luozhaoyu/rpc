@@ -435,9 +435,7 @@ func (f *MyFile) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
 	if f.File.Info.ModificationTime < fileInfo.ModificationTime {
 		myPrintf("Release:%v\tWARNING\tLocalFileExpireNoUpload", filePath)
 	} else {
-		if newChecksum == f.LastChecksum {
-			myPrintf("Release:%v\tNoChangeNoUpload\t%v\t%v\t%v", filePath, f.buf.Len(), f.LastChecksum, newChecksum)
-		} else {
+		if newChecksum != f.LastChecksum || fileInfo.ModificationTime == 0 { // file changes OR server does not have that file
 			var in proto.FileData
 			in.Path = &proto.Path{Data: filePath}
 			in.Contents = f.buf.Bytes()
@@ -449,6 +447,8 @@ func (f *MyFile) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
 			}
 			f.LastChecksum = newChecksum
 			myPrintf("Release:%v\tUpload %v B", filePath, f.buf.Len())
+		} else {
+			myPrintf("Release:%v\tNoChangeNoUpload\t%v\t%v\t%v\t%v", filePath, f.buf.Len(), f.LastChecksum, newChecksum, fileInfo)
 		}
 	}
 	return nil
