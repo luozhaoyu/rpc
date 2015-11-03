@@ -10,6 +10,7 @@ import (
 	"hash/crc32"
 	"io/ioutil"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -264,21 +265,35 @@ func (f *MyFile) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.Rea
 	return nil
 }
 
+func WriteAt(buf *bytes.Buffer, data []byte, offset int) error {
+	if offset > buf.Len() {
+		return fmt.Errorf("offset %v > buf %v: %v", offset, buf, data)
+	}
+	oldLength := buf.Len()
+	if offset+len(data) > oldLength { // enlarge the file
+		fmt.Println(offset+len(data)-oldLength, oldLength, offset, len(data))
+		n, err := buf.Write(data[oldLength-offset:]) // write the back first to enlarge the buf size
+		if err != nil || n != offset+len(data)-oldLength {
+			fmt.Errorf("%v\t%v\toffset+length:%v\tlength-offset:%v", err, data, offset+len(data), oldLength-offset)
+			return err
+		}
+	}
+	tmp := buf.Bytes()
+	copy(tmp[offset:oldLength], data[:int(math.Min(float64(oldLength-offset), float64(len(data))))])
+	return nil
+}
+
 // only for opened file or directory
 func (f *MyFile) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.WriteResponse) error {
-	tmp := f.buf.Bytes()
-	nbuf := new(bytes.Buffer)
 	if req.FileFlags == fuse.OpenReadWrite || req.FileFlags == fuse.OpenWriteOnly {
-		nbuf.Write(tmp[:req.Offset])
-		nbuf.Write(req.Data)
-		if int(req.Offset)+len(req.Data) < len(tmp) {
-			nbuf.Write(tmp[int(req.Offset)+len(req.Data):])
+		err := WriteAt(&f.buf, req.Data, int(req.Offset))
+		log.Println("Write:", f.getPath(), req.FileFlags, req.Flags, req.Offset, len(req.Data), " -> ", f.buf.Len())
+		if err != nil {
+			return fuse.EIO
 		}
-		log.Println("Write:", f.getPath(), req.FileFlags, req.Flags, req.Offset, len(req.Data), " -> ", nbuf.Len())
 	} else {
 		log.Println("Write:", f.getPath(), "\tStrangeFileFlags\t", req.FileFlags, req.Flags, req.Offset, len(req.Data))
 	}
-	f.buf = *nbuf
 	resp.Size = len(req.Data)
 	f.File.Info.Size = uint64(f.buf.Len())
 	f.File.Info.ModificationTime = uint64(time.Now().Unix())
@@ -352,7 +367,7 @@ func (f *MyFile) Flush(ctx context.Context, req *fuse.FlushRequest) error {
 		log.Println(err)
 		return err
 	}
-	log.Println("Flush:", f.getPath(), req.Flags, "\tTo", cacheFileName, buf.Len())
+	log.Println("Flush:", f.getPath(), f.buf.Len(), "\tflag:", req.Flags, "\tTo", cacheFileName, buf.Len())
 	return nil
 }
 
@@ -383,7 +398,7 @@ func (f *MyFile) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
 		log.Printf("Release:%v\tWARNING\tLocalFileExpireNoUpload", filePath)
 	} else {
 		if newChecksum == f.LastChecksum {
-			log.Printf("Release:%v\tNoChangeNoUpload\t%v\t%v", filePath, f.LastChecksum, newChecksum)
+			log.Printf("Release:%v\tNoChangeNoUpload\t%v\t%v\t%v", filePath, f.buf.Len(), f.LastChecksum, newChecksum)
 		} else {
 			var in proto.FileData
 			in.Path = &proto.Path{Data: filePath}
