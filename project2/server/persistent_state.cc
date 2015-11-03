@@ -48,17 +48,18 @@ std::istream& operator>>(std::istream& is, PersistentState::Transaction& t) {
   } else if (line.find("WRITE ") == 0) {
     t.type = PersistentState::kWrite;
     size_t first_delim = line.find(" /// ");
+    // std::cout << "first delim at " << first_delim << " for " << line << "\n";
     if (first_delim == std::string::npos) {
       t.good = false;
       return is;
     }
-    t.SetIdFromPath(line.substr(6, first_delim));
+    t.SetIdFromPath(line.substr(6, first_delim - 6));
     size_t second_delim = line.find(" /// ", first_delim + 5);
     if (second_delim == std::string::npos) {
       t.good = false;
       return is;
     }
-    t.target_path = line.substr(first_delim + 5, second_delim);
+    t.target_path = line.substr(first_delim + 5, second_delim - first_delim - 5);
     t.good = true;
     return is;
   } else {
@@ -67,22 +68,21 @@ std::istream& operator>>(std::istream& is, PersistentState::Transaction& t) {
   }
 }
 
-bool PersistentState::FinalizeUpdate(UpdateToken* token) {
+int PersistentState::FinalizeUpdate(UpdateToken* token) {
   token->GetStream()->close();
   struct stat st_buffer;
   int err = stat(token->GetPersistentPath().c_str(), &st_buffer);
   if (err != 0) {
-    std::cerr << "WTF no log for " << token->GetPersistentPath() << " " << -errno << "\n";
-    return false;
+    // std::cerr << "WTF no log for " << token->GetPersistentPath() << " " << -errno << "\n";
+    return -errno;
   }
 
   Lock lock;
   err = std::rename(token->GetPersistentPath().c_str(), token->GetTargetPath().c_str());
-  
+  if (err != 0) { err = -errno; }
   store_ << "WRITE " << token->GetPersistentPath() << " /// " << token->GetTargetPath()
     << " /// " << st_buffer.st_size << std::endl; // includes flush.
-
-  return err == 0;
+  return err;
 }
 
 void PersistentState::Transaction::SetIdFromPath(std::string path) {
@@ -91,6 +91,7 @@ void PersistentState::Transaction::SetIdFromPath(std::string path) {
   if (base == std::string::npos) { base = 0; }
   else { ++base; }
   std::string base_str = persistent_path.substr(base);
+  // std::cout << "get id from " << base_str << " which is part of " << persistent_path << "\n";
   id = std::stoi(base_str);
 }
 
@@ -134,10 +135,13 @@ bool PersistentState::StartAndRecoverState() {
         started_transactions.erase(iter);
 	continue;
       }
-      std::rename(transaction.persistent_path.c_str(),
+      int err = std::rename(transaction.persistent_path.c_str(),
         transaction.target_path.c_str());
       ret = stat(transaction.persistent_path.c_str(), &st_buf);
-      if (ret == 0) { assert(0 && "rename not finished before stat."); }
+
+      // if persistent file still exists and an error occurred, abort.
+      // else something weird happened.
+      if (ret == 0 && err == 0) { assert(0 && "rename not finished before stat."); }
       started_transactions.erase(iter);
     }
   }

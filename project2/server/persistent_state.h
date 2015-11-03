@@ -59,7 +59,7 @@ public:
   
   bool CreateUpdateFile(const std::string& full_path, UpdateToken* token);
 
-  bool FinalizeUpdate(UpdateToken* token);
+  int FinalizeUpdate(UpdateToken* token);
 
   bool StartAndRecoverState();
 private:

@@ -240,9 +240,9 @@ Status FileService::UploadFile(ServerContext* ctx, const FileData* file,
     return Status::OK;
   }
 
-  persistence_.FinalizeUpdate(&token);
+  int err = persistence_.FinalizeUpdate(&token);
 
-  Log()->UploadFileEvent(full_path, file->path().data(), file->contents(), 0);
+  Log()->UploadFileEvent(full_path, file->path().data(), file->contents(), err);
   GetFileInfo(full_path, file->path().data(), false, info);
   return Status::OK;
 }
