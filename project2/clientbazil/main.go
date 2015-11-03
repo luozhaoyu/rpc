@@ -29,13 +29,13 @@ import (
 
 func myPrintf(format string, a ...interface{}) {
 	if verbose {
-		log.Printf(format, a)
+		log.Printf(format, a...)
 	}
 }
 
 func myPrintln(a ...interface{}) {
 	if verbose {
-		log.Println(a)
+		log.Println(a...)
 	}
 }
 
@@ -90,7 +90,7 @@ func (f *MyFS) recover(path string, info os.FileInfo, err error) error {
 	f.FileCaches[brokenFile.FilePath] = &brokenFile
 
 	// remove after success
-	if !doCrash {
+	if !doCrashDemo {
 		if err := os.Remove(path); err != nil {
 			log.Println("FailInRemove:", path)
 			return err
@@ -110,7 +110,7 @@ func (f *MyFS) diagnose() error {
 	return nil
 }
 
-var doCrash bool
+var doCrashDemo bool
 var verbose bool
 
 func main() {
@@ -118,7 +118,7 @@ func main() {
 	flag.StringVar(&mountPoint, "m", "root", "path you want to mount AFS")
 	flag.StringVar(&cachePath, "c", "cache", "cache files for write operations")
 	flag.StringVar(&ip, "server", "localhost:61512", "server address")
-	flag.BoolVar(&doCrash, "crash", false, "do crash demo or not:\nthis would disable donwload files from server and prevent delete cache files")
+	flag.BoolVar(&doCrashDemo, "demo", false, "do crash demo or not:\nthis would disable donwload files from server and prevent delete cache files")
 	flag.BoolVar(&verbose, "v", false, "verbose output, especially for Write()")
 	flag.Parse()
 
@@ -133,7 +133,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("MountPath: %s\tCachePath: %s\tCrashDemo?:%v\tVerboseOutput?:%v\n", mountPoint, cachePath, doCrash, verbose)
+	log.Printf("MountPath: %s\tCachePath: %s\tCrashDemo?:%v\tVerboseOutput?:%v\n", mountPoint, cachePath, doCrashDemo, verbose)
 	myfs := &MyFS{
 		cachePath:  cachePath,
 		Client:     NewGrpcClient(ip),
@@ -354,7 +354,7 @@ func (f *MyFile) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.Ope
 			msg = "CacheValidNoDownload"
 		}
 	}
-	if NeedDownload && !doCrash {
+	if NeedDownload && !doCrashDemo {
 		path := proto.Path{Data: filePath}
 		myfile, err := f.fs.Client.DownloadFile(context.Background(), &path)
 		if err != nil {
