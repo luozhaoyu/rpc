@@ -27,6 +27,18 @@ import (
 	_ "bazil.org/fuse/fs/fstestutil"
 )
 
+func myPrintf(format string, a ...interface{}) {
+	if verbose {
+		log.Printf(format, a)
+	}
+}
+
+func myPrintln(a ...interface{}) {
+	if verbose {
+		log.Println(a)
+	}
+}
+
 func NewGrpcClient(ip string) proto.BasicFileServiceClient {
 	conn, err := grpc.Dial(ip, grpc.WithInsecure())
 	if err != nil {
@@ -107,7 +119,7 @@ func main() {
 	flag.StringVar(&cachePath, "c", "cache", "cache files for write operations")
 	flag.StringVar(&ip, "server", "localhost:61512", "server address")
 	flag.BoolVar(&doCrash, "crash", false, "do crash demo or not:\nthis would disable donwload files from server and prevent delete cache files")
-	flag.BoolVar(&verbose, "verbose", false, "Print more output, especially for Write()")
+	flag.BoolVar(&verbose, "v", false, "verbose output, especially for Write()")
 	flag.Parse()
 
 	c, err := fuse.Mount(
@@ -121,7 +133,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("MountPath: %s, CachePath: %s\n", mountPoint, cachePath)
+	log.Printf("MountPath: %s\tCachePath: %s\tCrashDemo?:%v\tVerboseOutput?:%v\n", mountPoint, cachePath, doCrash, verbose)
 	myfs := &MyFS{
 		cachePath:  cachePath,
 		Client:     NewGrpcClient(ip),
@@ -173,10 +185,10 @@ func (f *MyFile) Lookup(ctx context.Context, name string) (fs.Node, error) {
 		path := proto.Path{Data: filePath}
 		fileInfo, err := f.fs.Client.GetFileInfo(context.Background(), &path)
 		if err != nil || fileInfo.ErrorCode != 0 {
-			log.Println("Lookup fail\t", filePath, err, fileInfo)
+			myPrintln("Lookup fail\t", filePath, err, fileInfo)
 			return nil, fuse.ENOENT
 		}
-		log.Println("Lookup:", filePath, "\tinit&response:", fileInfo)
+		myPrintln("Lookup:", filePath, "\tinit&response:", fileInfo)
 		f.fs.FileCaches[filePath] = &MyFile{
 			NeedDownload: true,
 			Name:         name,
@@ -185,7 +197,7 @@ func (f *MyFile) Lookup(ctx context.Context, name string) (fs.Node, error) {
 			buf:          *bytes.NewBuffer([]byte{}),
 			File:         &proto.File{Info: fileInfo}}
 	}
-	log.Printf("Lookup:%v\t%v", filePath, f.fs.FileCaches[filePath].File.Info)
+	myPrintf("Lookup:%v\t%v", filePath, f.fs.FileCaches[filePath].File.Info)
 	return f.fs.FileCaches[filePath], nil
 }
 
@@ -199,7 +211,7 @@ func (f *MyFile) ReadDirAll(ctx context.Context) (c []fuse.Dirent, err error) {
 	for _, fileInfo := range dirInfo.Contents {
 		c = append(c, fuse.Dirent{Name: fileInfo})
 	}
-	log.Println("ReadDirAll:", f.getPath(), dirInfo.Contents)
+	myPrintln("ReadDirAll:", f.getPath(), dirInfo.Contents)
 	return c, err
 }
 
@@ -237,14 +249,14 @@ func (f *MyFile) Attr(ctx context.Context, a *fuse.Attr) error {
 		path := proto.Path{Data: filePath}
 		fileInfo, err := f.fs.Client.GetFileInfo(context.Background(), &path)
 		if err != nil {
-			log.Println(err)
+			myPrintln(err)
 			return fuse.ENOENT
 		}
 		f.File = &proto.File{Info: fileInfo}
 		f.fs.FileCaches[filePath] = f
-		log.Println("Attr:", filePath, "\tAttrFetched\t", f.File.Info)
+		myPrintln("Attr:", filePath, "\tAttrFetched\t", f.File.Info)
 	} else {
-		log.Println("Attr:", filePath, "\tHasCache\tMTime:", f.File.Info.ModificationTime)
+		myPrintln("Attr:", filePath, "\tHasCache\tMTime:", f.File.Info.ModificationTime)
 	}
 	a.Inode = f.File.Info.Inode
 	if f.File.Info.Mode&0170000 == 0040000 {
@@ -252,7 +264,7 @@ func (f *MyFile) Attr(ctx context.Context, a *fuse.Attr) error {
 	} else { // by default is regulare file, include newly created file
 		a.Mode = 0644
 	}
-	log.Println(filePath, "IsDir:", a.Mode.IsDir(), a.Mode.IsRegular(), a.Mode, f.File.Info.Mode, uint32(a.Mode))
+	myPrintln(filePath, "IsDir:", a.Mode.IsDir(), a.Mode.IsRegular(), a.Mode, f.File.Info.Mode, uint32(a.Mode))
 	a.Uid = 20001 // zhaoyu
 	a.Size = f.File.Info.Size
 	a.Atime = time.Unix(int64(f.File.Info.AccessTime), 0)
@@ -267,7 +279,7 @@ func (f *MyFile) ReadAll(ctx context.Context) ([]byte, error) {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 
-	log.Println("ReadAll:", f.getPath(), f.buf.Len())
+	myPrintln("ReadAll:", f.getPath(), f.buf.Len())
 	f.File.Info.AccessTime = uint64(time.Now().Unix())
 	return f.buf.Bytes(), nil
 }
@@ -284,7 +296,6 @@ func WriteAt(buf *bytes.Buffer, data []byte, offset int) error {
 	}
 	oldLength := buf.Len()
 	if offset+len(data) > oldLength { // enlarge the file
-		fmt.Println(offset+len(data)-oldLength, oldLength, offset, len(data))
 		n, err := buf.Write(data[oldLength-offset:]) // write the back first to enlarge the buf size
 		if err != nil || n != offset+len(data)-oldLength {
 			fmt.Errorf("%v\t%v\toffset+length:%v\tlength-offset:%v", err, data, offset+len(data), oldLength-offset)
@@ -301,13 +312,13 @@ func (f *MyFile) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.W
 	if req.FileFlags == fuse.OpenReadWrite || req.FileFlags == fuse.OpenWriteOnly {
 		err := WriteAt(&f.buf, req.Data, int(req.Offset))
 		if verbose {
-			log.Println("Write:", f.getPath(), req.FileFlags, req.Flags, req.Offset, len(req.Data), " -> ", f.buf.Len())
+			myPrintln("Write:", f.getPath(), req.FileFlags, req.Flags, req.Offset, len(req.Data), " -> ", f.buf.Len())
 		}
 		if err != nil {
 			return fuse.EIO
 		}
 	} else {
-		log.Println("Write:", f.getPath(), "\tStrangeFileFlags\t", req.FileFlags, req.Flags, req.Offset, len(req.Data))
+		myPrintln("Write:", f.getPath(), "\tStrangeFileFlags\t", req.FileFlags, req.Flags, req.Offset, len(req.Data))
 	}
 	resp.Size = len(req.Data)
 	f.File.Info.Size = uint64(f.buf.Len())
@@ -333,7 +344,7 @@ func (f *MyFile) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.Ope
 		path := proto.Path{Data: filePath}
 		fileInfo, err := f.fs.Client.GetFileInfo(context.Background(), &path)
 		if err != nil {
-			log.Println(err)
+			myPrintln(err)
 			return nil, fuse.ENOENT
 		}
 		if f.File.Info.ModificationTime < fileInfo.ModificationTime {
@@ -347,14 +358,14 @@ func (f *MyFile) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.Ope
 		path := proto.Path{Data: filePath}
 		myfile, err := f.fs.Client.DownloadFile(context.Background(), &path)
 		if err != nil {
-			log.Println(err)
+			myPrintln(err)
 			return nil, fuse.ENOENT
 		}
 		f.File = myfile
 		f.buf.Reset()
 		_, err = f.buf.Write(myfile.Contents)
 		if err != nil {
-			log.Println(err)
+			myPrintln(err)
 			return nil, fuse.ENOENT
 		}
 		f.NeedDownload = false
@@ -364,7 +375,7 @@ func (f *MyFile) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.Ope
 	}
 	f.File.Info.AccessTime = uint64(time.Now().Unix())
 	resp.Handle = fuse.HandleID(f.File.Info.Inode)
-	log.Printf("Open: %v\t%v\t%v\t%v", filePath, time.Now().Sub(startTime), msg, f.LastChecksum)
+	myPrintf("Open: %v\t%v\t%v\t%v", filePath, time.Now().Sub(startTime), msg, f.LastChecksum)
 	return f, nil
 }
 
@@ -377,29 +388,31 @@ func (f *MyFile) Flush(ctx context.Context, req *fuse.FlushRequest) error {
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
 	if err := enc.Encode(f); err != nil {
-		log.Println(err)
+		myPrintln(err)
 		return err
 	}
 	err := ioutil.WriteFile(cacheFilePath, buf.Bytes(), 0644)
 	if err != nil {
-		log.Println(err)
+		myPrintln(err)
 		return err
 	}
-	log.Println("Flush:", f.getPath(), f.buf.Len(), "\tflag:", req.Flags, "\tTo", cacheFileName, buf.Len())
+	myPrintln("Flush:", f.getPath(), f.buf.Len(), "\tflag:", req.Flags, "\tTo", cacheFileName, buf.Len())
 	go func() {
-		log.Println("AsyncRelease\t", filePath, f.buf.Len())
+		id := time.Now().Unix()
+		myPrintln("AsyncReleaseStart\t", filePath, f.buf.Len(), id)
 		f.Release(nil, nil)
+		myPrintln("AsyncReleaseEnd\t", filePath, f.buf.Len(), id)
 	}()
 	return nil
 }
 
 func (f *MyFile) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 	filePath := filepath.Join(f.getPath(), req.Name)
-	log.Printf("DirRemove:%v", filePath)
+	myPrintf("DirRemove:%v", filePath)
 	path := proto.Path{Data: filePath}
 	result, err := f.fs.Client.RemoveFile(context.Background(), &path)
 	if err != nil || result.ErrorCode != 0 {
-		log.Printf("Fail to remove %v because: %v %v", filePath, err, result.ErrorCode)
+		myPrintf("Fail to remove %v because: %v %v", filePath, err, result.ErrorCode)
 		return err
 	}
 	delete(f.fs.FileCaches, filePath)
@@ -414,27 +427,28 @@ func (f *MyFile) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
 	path := proto.Path{Data: filePath}
 	fileInfo, err := f.fs.Client.GetFileInfo(context.Background(), &path)
 	if err != nil {
-		log.Println(err)
+		myPrintln(err)
 		return fuse.ENOENT
 	}
 
 	newChecksum := crc32.ChecksumIEEE(f.buf.Bytes())
 	if f.File.Info.ModificationTime < fileInfo.ModificationTime {
-		log.Printf("Release:%v\tWARNING\tLocalFileExpireNoUpload", filePath)
+		myPrintf("Release:%v\tWARNING\tLocalFileExpireNoUpload", filePath)
 	} else {
 		if newChecksum == f.LastChecksum {
-			log.Printf("Release:%v\tNoChangeNoUpload\t%v\t%v\t%v", filePath, f.buf.Len(), f.LastChecksum, newChecksum)
+			myPrintf("Release:%v\tNoChangeNoUpload\t%v\t%v\t%v", filePath, f.buf.Len(), f.LastChecksum, newChecksum)
 		} else {
 			var in proto.FileData
 			in.Path = &proto.Path{Data: filePath}
 			in.Contents = f.buf.Bytes()
+			myPrintf("Release:%v\tUploadPreparing:%v", filePath, f.buf.Len())
 			response, err := f.fs.Client.UploadFile(context.Background(), &in)
 			if err != nil || response.ErrorCode != 0 {
-				log.Println(err, response)
+				myPrintln(err, response)
 				return err
 			}
 			f.LastChecksum = newChecksum
-			log.Printf("Release:%v\tUpload %v B", filePath, f.buf.Len())
+			myPrintf("Release:%v\tUpload %v B", filePath, f.buf.Len())
 		}
 	}
 	return nil
@@ -448,13 +462,13 @@ func (f *MyFile) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse
 	path := proto.Path{Data: filePath}
 	result, err := f.fs.Client.CreateFile(context.Background(), &path)
 	if err != nil || result.ErrorCode != 0 {
-		log.Printf("Fail to create %v because: %v %v", filePath, err, result.ErrorCode)
+		myPrintf("Fail to create %v because: %v %v", filePath, err, result.ErrorCode)
 		return nil, nil, err
 	}
 	// fetch fileinfo into cache
 	fileInfo, err := f.fs.Client.GetFileInfo(context.Background(), &path)
 	if err != nil || fileInfo.ErrorCode != 0 {
-		log.Println("GetFileInfo fail\t", filePath, err, fileInfo)
+		myPrintln("GetFileInfo fail\t", filePath, err, fileInfo)
 		return nil, nil, err
 	}
 
@@ -465,23 +479,23 @@ func (f *MyFile) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse
 		fs:           f.fs,
 		buf:          *bytes.NewBuffer([]byte{}),
 		File:         &proto.File{Info: fileInfo}}
-	log.Println("FileCreate:", filePath, f.fs.FileCaches[filePath])
+	myPrintln("FileCreate:", filePath, f.fs.FileCaches[filePath])
 	return f.fs.FileCaches[filePath], f.fs.FileCaches[filePath], nil
 }
 
 func (f *MyFile) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, error) {
 	filePath := filepath.Join(f.getPath(), req.Name)
-	log.Println("Mkdir:", filePath)
+	myPrintln("Mkdir:", filePath)
 	path := proto.Path{Data: filePath}
 	result, err := f.fs.Client.CreateDirectory(context.Background(), &path)
 	if err != nil || result.ErrorCode != 0 {
-		log.Println("Fail to create %v because: %v", filePath, err)
+		myPrintf("Fail to create %v because: %v", filePath, err)
 		return nil, err
 	}
 	// get fileinfo into cache
 	fileInfo, err := f.fs.Client.GetFileInfo(context.Background(), &path)
 	if err != nil || fileInfo.ErrorCode != 0 {
-		log.Println("GetFileInfo fail\t", err, fileInfo)
+		myPrintln("GetFileInfo fail\t", err, fileInfo)
 		return nil, err
 	}
 

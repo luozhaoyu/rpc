@@ -8,6 +8,7 @@ clean:
 	> client.log
 	-killall clientbazil
 	-sudo fusermount -u root
+	-sudo fusermount -u rootlzy
 	go clean
 
 build:
@@ -15,7 +16,7 @@ build:
 	go build
 
 run:
-	./clientbazil root > client.log 2>&1 &
+	./clientbazil -m root > client.log 2>&1 &
 	-go test -v
 	tail -f client.log
 
