@@ -316,10 +316,27 @@ func WriteAt(buf *bytes.Buffer, data []byte, offset int) error {
 
 // only for opened file or directory
 func (f *MyFile) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.WriteResponse) error {
-	if req.FileFlags == fuse.OpenReadWrite || req.FileFlags == fuse.OpenWriteOnly {
+	if req.FileFlags == fuse.OpenTruncate {
+		f.buf.Reset()
+		n, err := f.buf.Write(req.Data)
+		if verbose {
+			myPrintln("WriteOnly:", f.getPath(), req.FileFlags, req.Flags, req.Offset, len(req.Data), " -> ", f.buf.Len())
+		}
+		if err != nil || n != len(req.Data) {
+			return fuse.EIO
+		}
+	} else if req.FileFlags == fuse.OpenReadWrite || (req.FileFlags == fuse.OpenWriteOnly && req.FileFlags != fuse.OpenTruncate) {
 		err := WriteAt(&f.buf, req.Data, int(req.Offset))
 		if verbose {
 			myPrintln("Write:", f.getPath(), req.FileFlags, req.Flags, req.Offset, len(req.Data), " -> ", f.buf.Len())
+		}
+		if err != nil {
+			return fuse.EIO
+		}
+	} else if req.FileFlags&fuse.OpenAppend != 0 {
+		err := WriteAt(&f.buf, req.Data, int(math.Max(float64(f.buf.Len()-1), 0)))
+		if verbose {
+			myPrintln("WriteAppend:", f.getPath(), req.FileFlags, req.Flags, req.Offset, len(req.Data), " -> ", f.buf.Len())
 		}
 		if err != nil {
 			return fuse.EIO
