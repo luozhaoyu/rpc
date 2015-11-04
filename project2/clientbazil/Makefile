@@ -16,7 +16,7 @@ build:
 	go build
 
 run:
-	./clientbazil -m root > client.log 2>&1 &
+	./clientbazil -v -m root > client.log 2>&1 &
 	-go test -v
 	tail -f client.log
 

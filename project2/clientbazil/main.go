@@ -86,7 +86,13 @@ func (f *MyFS) recover(path string, info os.FileInfo, err error) error {
 		log.Println("FileCopyError", err, brokenFile.buf)
 		return err
 	}
-	log.Println("Recovered:", path, string(fileName), info.Size(), brokenFile.File, brokenFile.buf.String(), brokenFile.Parent)
+
+	if brokenFile.Checksum != crc32.ChecksumIEEE(brokenFile.Data) {
+		log.Println("RecoverFailed:", path, string(fileName), info.Size(), brokenFile.File, brokenFile.buf.String(), brokenFile.Parent)
+		return fmt.Errorf("Fail to mach recover file crc32:%v", path)
+	} else {
+		log.Println("Recovered:", path, string(fileName), info.Size(), brokenFile.File, brokenFile.buf.String(), brokenFile.Parent)
+	}
 	f.FileCaches[brokenFile.FilePath] = &brokenFile
 
 	// remove after success
@@ -217,16 +223,17 @@ func (f *MyFile) ReadDirAll(ctx context.Context) (c []fuse.Dirent, err error) {
 
 // File implements both Node and Handle for the hello file.
 type MyFile struct {
-	File         *proto.File
-	Name         string
-	Data         []byte
-	FilePath     string
-	Parent       *MyFile
-	fs           *MyFS
-	buf          bytes.Buffer
-	NeedDownload bool
-	LastChecksum uint32
-	lock         sync.Mutex
+	File               *proto.File
+	Name               string
+	Data               []byte
+	FilePath           string
+	Parent             *MyFile
+	fs                 *MyFS
+	buf                bytes.Buffer
+	NeedDownload       bool
+	Checksum           uint32 // ensure consistency in flush()
+	LastUploadChecksum uint32 // check change before upload
+	lock               sync.Mutex
 }
 
 type MyFileData struct {
@@ -370,20 +377,20 @@ func (f *MyFile) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.Ope
 		}
 		f.NeedDownload = false
 		// the only place needs to calculate crc32
-		f.LastChecksum = crc32.ChecksumIEEE(f.buf.Bytes())
+		f.Checksum = crc32.ChecksumIEEE(f.buf.Bytes())
+		f.LastUploadChecksum = f.Checksum
 		msg = "FetchedServer"
 	}
 	f.File.Info.AccessTime = uint64(time.Now().Unix())
 	resp.Handle = fuse.HandleID(f.File.Info.Inode)
-	myPrintf("Open: %v\t%v\t%v\t%v", filePath, time.Now().Sub(startTime), msg, f.LastChecksum)
+	myPrintf("Open: %v\t%v\t%v\t%v", filePath, time.Now().Sub(startTime), msg, f.Checksum)
 	return f, nil
 }
 
 func (f *MyFile) Flush(ctx context.Context, req *fuse.FlushRequest) error {
 	filePath := f.getPath()
-	cacheFileName := base64.StdEncoding.EncodeToString([]byte(filePath))
-	cacheFilePath := filepath.Join(f.fs.cachePath, cacheFileName)
 	f.Data = f.buf.Bytes()
+	f.Checksum = crc32.ChecksumIEEE(f.buf.Bytes())
 	f.FilePath = filePath
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
@@ -391,6 +398,8 @@ func (f *MyFile) Flush(ctx context.Context, req *fuse.FlushRequest) error {
 		myPrintln(err)
 		return err
 	}
+	cacheFileName := base64.StdEncoding.EncodeToString([]byte(filePath))
+	cacheFilePath := filepath.Join(f.fs.cachePath, cacheFileName)
 	err := ioutil.WriteFile(cacheFilePath, buf.Bytes(), 0644)
 	if err != nil {
 		myPrintln(err)
@@ -435,7 +444,7 @@ func (f *MyFile) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
 	if f.File.Info.ModificationTime < fileInfo.ModificationTime {
 		myPrintf("Release:%v\tWARNING\tLocalFileExpireNoUpload", filePath)
 	} else {
-		if newChecksum != f.LastChecksum || fileInfo.ModificationTime == 0 { // file changes OR server does not have that file
+		if newChecksum != f.LastUploadChecksum || fileInfo.ModificationTime == 0 { // file changes OR server does not have that file
 			var in proto.FileData
 			in.Path = &proto.Path{Data: filePath}
 			in.Contents = f.buf.Bytes()
@@ -445,10 +454,22 @@ func (f *MyFile) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
 				myPrintln(err, response)
 				return err
 			}
-			f.LastChecksum = newChecksum
+			f.LastUploadChecksum = newChecksum
 			myPrintf("Release:%v\tUpload %v B", filePath, f.buf.Len())
 		} else {
-			myPrintf("Release:%v\tNoChangeNoUpload\t%v\t%v\t%v\t%v", filePath, f.buf.Len(), f.LastChecksum, newChecksum, fileInfo)
+			myPrintf("Release:%v\tNoChangeNoUpload\t%v\t%v\t%v\t%v", filePath, f.buf.Len(), f.LastUploadChecksum, newChecksum, fileInfo)
+		}
+	}
+
+	// remove cache file after Upload succeed
+	cacheFileName := base64.StdEncoding.EncodeToString([]byte(filePath))
+	cacheFilePath := filepath.Join(f.fs.cachePath, cacheFileName)
+	if !doCrashDemo { // leaves the cache files if we are doing demo
+		if _, err = os.Stat(cacheFilePath); err == nil {
+			if err := os.Remove(cacheFilePath); err != nil {
+				log.Println("FailInRemove:", cacheFilePath, err)
+				return err
+			}
 		}
 	}
 	return nil
