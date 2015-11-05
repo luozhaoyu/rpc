@@ -32,6 +32,7 @@ public:
   Arguments(ModeType mode)
     : mode_(mode)
     , port_(61512)
+    , crash_write_(false)
     , dump_files_(false)
     , show_help_(false)
     , fuse_args_(2)
@@ -46,6 +47,8 @@ public:
 
   const std::string& GetExecutable() const { return executable_; }
 
+  bool GetCrashWrite() const { return crash_write_; }
+  
   bool GetDumpFiles() const { return dump_files_; }
 
   int GetFuseArgs() const { return fuse_args_; }
@@ -78,6 +81,7 @@ private:
 
   const ModeType mode_;
   int port_;
+  bool crash_write_;
   bool dump_files_;
   bool show_help_;
   int fuse_args_;

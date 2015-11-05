@@ -12,9 +12,9 @@ namespace File {
 class FileService : public BasicFileService::Service {
 public:
   FileService(const std::string& mount_point, const std::string& persistent_dir,
-    const std::string& persistent_store)
+    const std::string& persistent_store, bool crash)
     : mount_point_(mount_point)
-    , persistence_(persistent_dir, persistent_store) { }
+    , persistence_(persistent_dir, persistent_store), crash_write_(crash) { }
 
   grpc::Status CreateDirectory(grpc::ServerContext* ctx, const Path* path,
     Result* result) override;
@@ -59,6 +59,7 @@ private:
 
   std::string mount_point_;
   PersistentState persistence_;
+  bool crash_write_;
 };
 
 }

@@ -231,6 +231,13 @@ Status FileService::UploadFile(ServerContext* ctx, const FileData* file,
     return Status::OK;
   }
 
+  if (crash_write_ && file->path().data() == "/crash-me") {
+    int crash_size = file->contents().size() > 2048 ? 1024 : file->contents().size() / 2;
+    token.GetStream()->write(file->contents().c_str(), crash_size);
+    token.GetStream()->flush();
+    assert(0 && "crash me detected");
+  }
+
   token.GetStream()->write(file->contents().c_str(), file->contents().size());
 
   if (token.GetStream()->bad()) {

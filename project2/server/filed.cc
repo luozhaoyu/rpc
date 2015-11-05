@@ -28,7 +28,7 @@ int main(int argc, const char** argv) {
   Log()->StartupEvent(args.GetMountPoint(), address);
 
   FileService service(args.GetMountPoint(), args.GetPersistentDirectory(),
-    args.GetPersistentStoreName());
+    args.GetPersistentStoreName(), args.GetCrashWrite());
   if (!service.Initialize()) {
     return -1;
   }

@@ -44,6 +44,7 @@ Arguments::StateType Arguments::Parse(const char* arg, StateType current_state, 
 	  case 'd': dump_files_ = true; return kReady;
 	  case 'q': verbosity_ = kFatal; return kReady;
 	  case 'L': verbosity_ = kTrace; return kReady;
+	  case 'c': crash_write_ = true; return kReady;
 	  default: errors_.push_back(kInvalidOption); return kReady;
 	}
       }
